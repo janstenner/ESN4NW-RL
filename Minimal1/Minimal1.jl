@@ -113,8 +113,8 @@ y0[1 + n_turbines * 2 + 1] = grid_price[1]
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 2.0
-nna_scale_critic = 4.0
+nna_scale = 3.0
+nna_scale_critic = 6.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
@@ -126,7 +126,7 @@ rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
 p = 0.995f0
-batch_size = 3
+batch_size = 10
 start_steps = -1
 start_policy = ZeroPolicy(action_space)
 update_after = 10
@@ -165,6 +165,9 @@ function do_step(env)
     if (env.time + env.dt) >= env.te 
         reward -= y[1]
     end
+
+    #reward shaping
+    reward = (-1) * (reward * 5)^2
     env.reward = [reward]
 
     
@@ -303,7 +306,7 @@ function train(use_random_init = true; visuals = false, num_steps = 4000, inner_
     
 
     
-    outer_loops = 1
+    outer_loops = 4
 
     for i = 1:outer_loops
         agent.policy.act_noise = act_noise
@@ -406,7 +409,7 @@ end
 
 
 function render_run()
-    copyto!(agent.policy.behavior_actor, hook.bestNNA)
+    # copyto!(agent.policy.behavior_actor, hook.bestNNA)
 
     temp_noise = agent.policy.act_noise
     agent.policy.act_noise = 0.0
@@ -445,7 +448,7 @@ function render_run()
         # push!(rewards, mean(env.reward))
     end
 
-    copyto!(agent.policy.behavior_actor, hook.currentNNA)
+    # copyto!(agent.policy.behavior_actor, hook.currentNNA)
 
     agent.policy.start_steps = temp_start_steps
     agent.policy.act_noise = temp_noise
