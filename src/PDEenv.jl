@@ -183,6 +183,7 @@ function RLBase.reset!(env::PDEenv)
     env.y = env.y0
     env.state = env.featurize(env.y0, env.t0)
     env.action = env.action0
+    env.delta_action = zeros(size(env.action0))
     env.p = env.prepare_action(env.action0, env.t0)
     env.steps = 0
     env.time = 0.0

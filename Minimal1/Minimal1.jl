@@ -167,7 +167,10 @@ function do_step(env)
     end
 
     #reward shaping
-    reward = (-1) * (reward * 5)^2
+    reward = (-1) * (reward * 15)^2
+
+    #delta_action punish
+    reward -= 0.02 * mean(env.delta_action)
     env.reward = [reward]
 
     
@@ -406,8 +409,10 @@ end
 
 
 
-function render_run()
-    # copyto!(agent.policy.behavior_actor, hook.bestNNA)
+function render_run(use_best = false)
+    if use_best
+        copyto!(agent.policy.behavior_actor, hook.bestNNA)
+    end
 
     temp_noise = agent.policy.act_noise
     agent.policy.act_noise = 0.0
@@ -442,15 +447,19 @@ function render_run()
 
         # println(mean(env.reward))
 
-        # reward_sum += mean(env.reward)
+        reward_sum += mean(env.reward)
         # push!(rewards, mean(env.reward))
     end
 
-    # copyto!(agent.policy.behavior_actor, hook.currentNNA)
+    if use_best
+        copyto!(agent.policy.behavior_actor, hook.currentNNA)
+    end
 
     agent.policy.start_steps = temp_start_steps
     agent.policy.act_noise = temp_noise
     agent.policy.update_after = temp_update_after
+
+    println(reward_sum)
 
 
     layout = Layout(
