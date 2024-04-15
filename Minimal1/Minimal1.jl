@@ -150,17 +150,21 @@ function do_step(env)
         compute_power += env.p[i]*0.01
     end
 
-    # reward calculation
+    # subtracting the computed load
     compute_power_used = min(y[1], compute_power)
+    y[1] -= compute_power_used
+
+
+    # reward calculation
     power_for_free = 0.0
     for i in 1:n_turbines
-        power_for_free += y[((i-1)*2)+3]*0.005
+        temp_free_power = (y[((i-1)*2)+3] - 0.5)*0.005
+        temp_free_power = max(0.0, compute_power_used)
+        power_for_free += temp_free_power
     end
     compute_power_used -= power_for_free
     compute_power_used = max(0.0, compute_power_used)
     reward = - compute_power_used * y[1 + n_turbines * 2 + 1]
-
-    y[1] -= compute_power_used
 
     if (env.time + env.dt) >= env.te 
         reward -= y[1]
@@ -170,7 +174,7 @@ function do_step(env)
     reward = (-1) * (reward * 15)^2
 
     #delta_action punish
-    reward -= 0.02 * mean(env.delta_action)
+    reward -= 0.02 * mean(abs.(env.delta_action))
     env.reward = [reward]
 
     
