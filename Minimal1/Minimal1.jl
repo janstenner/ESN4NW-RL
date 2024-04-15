@@ -61,10 +61,10 @@ sim_space = Space(fill(0..1, (state_dim)))
 function generate_wind()
     deviation = 1/5
 
-    result = sin.(collect(LinRange(rand()*3, 3+rand()*4, Int(te/dt)+1)))
+    result = sin.(collect(LinRange(rand()*3+1, 4+rand()*4, Int(te/dt)+1)))
 
     for i in 1:4
-        result += sin.(collect(LinRange(rand()+3, 3+rand()*i*4, Int(te/dt)+1)))
+        result += sin.(collect(LinRange(rand()+4, 5+rand()*i*4, Int(te/dt)+1)))
     end
 
     result .-= minimum(result)
@@ -162,7 +162,7 @@ function do_step(env)
         # curtailment energy onlny when wind is above 0.5
         temp_free_power = (y[((i-1)*2)+3] - 0.5)*0.005
         temp_free_power = max(0.0, compute_power_used)
-        
+
         power_for_free += temp_free_power
     end
     compute_power_used -= power_for_free
@@ -177,7 +177,7 @@ function do_step(env)
     reward = (-1) * (reward * 15)^2
 
     #delta_action punish
-    reward -= 0.02 * mean(abs.(env.delta_action))
+    reward -= 0.002 * mean(abs.(env.delta_action))
     env.reward = [reward]
 
     
@@ -436,7 +436,7 @@ function render_run(use_best = false)
 
     #w = Window()
 
-    results = Dict("hpc1" => [], "hpc2" => [], "hpc3" => [], "rewards" => [])
+    results = Dict("hpc1" => [], "hpc2" => [], "hpc3" => [], "rewards" => [], "loadleft" => [])
 
 
     RLBase.reset!(env)
@@ -451,6 +451,7 @@ function render_run(use_best = false)
         push!(results["hpc2"], env.p[2])
         push!(results["hpc3"], env.p[3])
         push!(results["rewards"], env.reward[1])
+        push!(results["loadleft"], env.y[1])
 
         # println(mean(env.reward))
 
@@ -478,6 +479,7 @@ function render_run(use_best = false)
                 scatter(y=results["hpc2"], name="hpc2"),
                 scatter(y=results["hpc3"], name="hpc3"),
                 scatter(y=results["rewards"], name="reward"),
+                scatter(y=results["loadleft"], name="load left"),
                 scatter(y=wind[1], name="wind1"),
                 scatter(y=wind[2], name="wind2"),
                 scatter(y=wind[3], name="wind3"),
