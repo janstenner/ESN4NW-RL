@@ -202,13 +202,11 @@ end
 function prepare_action(action0 = nothing, t0 = nothing; env = nothing) 
     if isnothing(env)
         action =  action0
-        p = action0
     else
         action = env.action
-        p = env.p
     end
 
-    action = (p .+1) .*0.5
+    action = (action .+1) .*0.5
 
     return action
 end
