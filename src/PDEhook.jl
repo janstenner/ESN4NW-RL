@@ -65,7 +65,7 @@ function (hook::PDEhook)(::PostActStage, agent, env)
 end
 
 function (hook::PDEhook)(::PostEpisodeStage, agent, env)
-    if env.time >= env.te && hook.ep >= hook.min_best_episode
+    if hook.ep >= hook.min_best_episode
         push!(hook.rewards_compare, hook.reward)
         if hook.collect_NNA && length(hook.rewards_compare) >= 1 && hook.reward >= maximum(hook.rewards_compare)
             copyto!(hook.bestNNA, agent.policy.behavior_actor)
