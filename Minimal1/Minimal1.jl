@@ -10,7 +10,7 @@ using PlotlyJS
 using FileIO, JLD2
 #using Blink
 
-n_turbines = 3
+n_turbines = 2
 
 
 scriptname = "Minimal1"
@@ -32,16 +32,16 @@ end
 
 # action vector dim - contains the percentage of maximum power the HPC in the turbine will use for the duration of next time step
 
-action_dim = 3
+action_dim = n_turbines
 
 # state vector
 
 # - amount of computation left (starts at 1.0 and goes to 0.0)
 # - wind stituation at every turbine (gradient of power output and current power output)
-# - current price of energy from the grid
+# - current gradtient and price of energy from the grid
 # - current time
 
-state_dim = 9
+state_dim = 4 + 2*n_turbines
 
 
 
@@ -104,18 +104,19 @@ clamp!(grid_price, -1, 1)
 # plot(grid_price)
 
 for i in 1:n_turbines
-    y0[((i-1)*2)+2] = wind[i][1] - wind[i][2]
-    y0[((i-1)*2)+3] = wind[i][1] 
+    y0[((i-1)*2)+2] = wind[i][2] - wind[i][1]
+    y0[((i-1)*2)+3] = wind[i][2] 
 end
 
-y0[1 + n_turbines * 2 + 1] = grid_price[1]
+y0[1 + n_turbines * 2 + 1] = grid_price[2] - grid_price[1]
+y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
 
 # agent tuning parameters
 memory_size = 0
 nna_scale = 3.0
 nna_scale_critic = 6.0
-drop_middle_layer = false
+drop_middle_layer = true
 drop_middle_layer_critic = false
 fun = leakyrelu
 use_gpu = false
@@ -160,35 +161,37 @@ function do_step(env)
     for i in 1:n_turbines
 
         # curtailment energy onlny when wind is above 0.5
-        temp_free_power = (y[((i-1)*2)+3] - 0.5)*0.005
-        temp_free_power = max(0.0, compute_power_used)
+        temp_free_power = (wind[i][step-1] - 0.5)*0.005
+        temp_free_power = max(0.0, temp_free_power)
 
         power_for_free += temp_free_power
     end
     compute_power_used -= power_for_free
     compute_power_used = max(0.0, compute_power_used)
-    reward = - compute_power_used * y[1 + n_turbines * 2 + 1]
+    reward = - compute_power_used * grid_price[step-1]
+
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1]
+        reward -= y[1] * 2
     end
 
     #reward shaping
     reward = (-1) * (reward * 15)^2
 
     #delta_action punish
-    reward -= 0.002 * mean(abs.(env.delta_action))
+    # reward -= 0.002 * mean(abs.(env.delta_action))
     env.reward = [reward]
 
     
     for i in 1:n_turbines
-        y[((i-1)*2)+2] = wind[i][step] - y[i+2]
+        y[((i-1)*2)+2] = wind[i][step] - wind[i][step-1]
         y[((i-1)*2)+3] = wind[i][step]
     end
 
-    y[1 + n_turbines * 2 + 1] = grid_price[step]
+    y[1 + n_turbines * 2 + 1] = grid_price[step] - grid_price[step-1]
+    y[1 + n_turbines * 2 + 2] = grid_price[step]
 
-    y[1 + n_turbines * 2 + 2] = env.time / env.te
+    y[1 + n_turbines * 2 + 3] = env.time / env.te
 
     return y
 end
@@ -279,11 +282,12 @@ function generate_random_init()
     clamp!(grid_price, -1, 1)
 
     for i in 1:n_turbines
-        y0[((i-1)*2)+2] = wind[i][1] - wind[i][2]
-        y0[((i-1)*2)+3] = wind[i][1] 
+        y0[((i-1)*2)+2] = wind[i][2] - wind[i][1]
+        y0[((i-1)*2)+3] = wind[i][2] 
     end
-
-    y0[1 + n_turbines * 2 + 1] = grid_price[1]
+    
+    y0[1 + n_turbines * 2 + 1] = grid_price[2] - grid_price[1]
+    y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
     env.y0 = y0
     env.y = env.y0
@@ -436,8 +440,13 @@ function render_run(use_best = false)
 
     #w = Window()
 
-    results = Dict("hpc1" => [], "hpc2" => [], "hpc3" => [], "rewards" => [], "loadleft" => [])
+    results = Dict("rewards" => [], "loadleft" => [])
 
+    for k in 1:n_turbines
+        results["hpc$k"] = []
+    end
+
+    global currentDF = DataFrame()
 
     RLBase.reset!(env)
     generate_random_init()
@@ -447,9 +456,9 @@ function render_run(use_best = false)
 
         env(action)
 
-        push!(results["hpc1"], env.p[1])
-        push!(results["hpc2"], env.p[2])
-        push!(results["hpc3"], env.p[3])
+        for k in 1:n_turbines
+            push!(results["hpc$k"], env.p[k])
+        end
         push!(results["rewards"], env.reward[1])
         push!(results["loadleft"], env.y[1])
 
@@ -457,6 +466,14 @@ function render_run(use_best = false)
 
         reward_sum += mean(env.reward)
         # push!(rewards, mean(env.reward))
+
+        tmp = DataFrame()
+        insertcols!(tmp, :timestep => env.steps)
+        insertcols!(tmp, :action => [vec(env.action)])
+        insertcols!(tmp, :p => [send_to_host(env.p)])
+        insertcols!(tmp, :y => [send_to_host(env.y)])
+        insertcols!(tmp, :reward => [reward(env)])
+        append!(hook.currentDF, tmp)
     end
 
     if use_best
@@ -473,17 +490,21 @@ function render_run(use_best = false)
     layout = Layout(
                     plot_bgcolor="#f1f3f7",
                     yaxis=attr(range=[0,1]),
+                    yaxis2 = attr(
+                        overlaying="y",
+                        side="right",
+                        titlefont_color="orange",
+                        #range=[-1, 1]
+                    ),
                 )
 
-    to_plot = [scatter(y=results["hpc1"], name="hpc1"),
-                scatter(y=results["hpc2"], name="hpc2"),
-                scatter(y=results["hpc3"], name="hpc3"),
-                scatter(y=results["rewards"], name="reward"),
+    to_plot = [scatter(y=results["rewards"], name="reward", yaxis = "y2"),
                 scatter(y=results["loadleft"], name="load left"),
-                scatter(y=wind[1], name="wind1"),
-                scatter(y=wind[2], name="wind2"),
-                scatter(y=wind[3], name="wind3"),
                 scatter(y=grid_price, name="grid price")]
+    for k in 1:n_turbines
+        push!(to_plot, scatter(y=results["hpc$k"], name="hpc$k"))
+        push!(to_plot, scatter(y=wind[k], name="wind$k"))
+    end
     plot(Vector{AbstractTrace}(to_plot), layout)
 
 end
