@@ -223,19 +223,22 @@ function (env::PDEenv)(action)
 
     env.steps += 1
     env.time += env.dt
-    if env.check_max_value == "y"
-        env.done = env.time >= env.te || maximum(abs.(env.y)) > env.max_value
-        if maximum(abs.(env.y)) > env.max_value
-            println("terminated early at $(env.steps) steps")
-            #env.reward += -0.4 * (1 - (env.time/env.te)) .* ones(size(env.reward))
+    if !env.done
+        if env.check_max_value == "y"
+            env.done = env.time >= env.te || maximum(abs.(env.y)) > env.max_value
+            if maximum(abs.(env.y)) > env.max_value
+                println("terminated early at $(env.steps) steps")
+                #env.reward += -0.4 * (1 - (env.time/env.te)) .* ones(size(env.reward))
+            end
+        elseif env.check_max_value == "reward"
+            env.done = env.time >= env.te || maximum(abs.(env.reward)) > env.max_value
+            if maximum(abs.(env.reward)) > env.max_value
+                println("terminated early at $(env.steps) steps")
+                #env.reward += -0.4 * (1 - (env.time/env.te)) .* ones(size(env.reward))
+            end
+        else
+            
+            env.done = env.time >= env.te
         end
-    elseif env.check_max_value == "reward"
-        env.done = env.time >= env.te || maximum(abs.(env.reward)) > env.max_value
-        if maximum(abs.(env.reward)) > env.max_value
-            println("terminated early at $(env.steps) steps")
-            #env.reward += -0.4 * (1 - (env.time/env.te)) .* ones(size(env.reward))
-        end
-    else
-        env.done = env.time >= env.te
     end
 end

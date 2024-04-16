@@ -10,7 +10,7 @@ using PlotlyJS
 using FileIO, JLD2
 #using Blink
 
-n_turbines = 2
+n_turbines = 1
 
 
 scriptname = "Minimal1"
@@ -153,7 +153,12 @@ function do_step(env)
 
     # subtracting the computed load
     compute_power_used = min(y[1], compute_power)
-    y[1] -= compute_power_used
+    y[1] -= compute_power
+    y[1] = max(y[1], 0.0)
+
+    if y[1] == 0.0
+        env.done = true
+    end
 
 
     # reward calculation
@@ -451,7 +456,7 @@ function render_run(use_best = false)
     RLBase.reset!(env)
     generate_random_init()
 
-    for i in 1:Int(te/dt)
+    while !env.done
         action = agent(env)
 
         env(action)
