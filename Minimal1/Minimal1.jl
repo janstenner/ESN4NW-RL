@@ -114,9 +114,9 @@ y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 3.0
+nna_scale = 2.0
 nna_scale_critic = 6.0
-drop_middle_layer = true
+drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
 use_gpu = false
@@ -181,11 +181,12 @@ function do_step(env)
     end
 
     #reward shaping
-    reward = (-1) * (reward * 15)^2
+    reward = (-1) * (reward * 26)^2
 
     #delta_action punish
     # reward -= 0.002 * mean(abs.(env.delta_action))
     env.reward = [reward]
+    clamp!(env.reward, -1.0, 0.0)
 
     
     for i in 1:n_turbines
