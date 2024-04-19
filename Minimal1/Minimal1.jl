@@ -181,7 +181,7 @@ function do_step(env)
     end
 
     #reward shaping
-    reward = (-1) * (reward * 26)^2
+    reward = (-1) * (reward * 19)^2
 
     #delta_action punish
     # reward -= 0.002 * mean(abs.(env.delta_action))
@@ -324,7 +324,7 @@ function train(use_random_init = true; visuals = false, num_steps = 4000, inner_
     
 
     
-    outer_loops = 4
+    outer_loops = 40
 
     for i = 1:outer_loops
         agent.policy.act_noise = act_noise
