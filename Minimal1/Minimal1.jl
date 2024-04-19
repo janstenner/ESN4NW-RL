@@ -114,7 +114,7 @@ y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 2.0
+nna_scale = 3.0
 nna_scale_critic = 6.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
@@ -166,7 +166,7 @@ function do_step(env)
     for i in 1:n_turbines
 
         # curtailment energy onlny when wind is above 0.5
-        temp_free_power = (wind[i][step-1] - 0.5)*0.005
+        temp_free_power = (wind[i][step-1] - 0.45)*0.01
         temp_free_power = max(0.0, temp_free_power)
 
         power_for_free += temp_free_power
@@ -177,16 +177,19 @@ function do_step(env)
 
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 2
+        reward -= y[1] * 8
+        env.reward = [reward]
+
+    else
+        #reward shaping
+        reward = (-1) * abs((reward * 45))^2.2
+
+        #delta_action punish
+        # reward -= 0.002 * mean(abs.(env.delta_action))
+        env.reward = [reward]
+        clamp!(env.reward, -1.0, 0.0)
     end
-
-    #reward shaping
-    reward = (-1) * (reward * 19)^2
-
-    #delta_action punish
-    # reward -= 0.002 * mean(abs.(env.delta_action))
-    env.reward = [reward]
-    clamp!(env.reward, -1.0, 0.0)
+    
 
     
     for i in 1:n_turbines
