@@ -171,13 +171,20 @@ function do_step(env)
 
         power_for_free += temp_free_power
     end
+    power_for_free_used = min(power_for_free, compute_power_used)
     compute_power_used -= power_for_free
     compute_power_used = max(0.0, compute_power_used)
-    reward = - sqrt(50 * compute_power_used) * ((grid_price[step-1] + 0.1)^2) * 0.5
+
+    reward1 = sqrt(50 * compute_power_used) * ((grid_price[step-1] + 0.2)^2) * 0.5
+
+    reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*3)
+
+    factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
+    reward = - (factor * reward1 + (1 - factor) * reward2) + power_for_free_used
 
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 320
+        reward -= y[1] * 100
         env.reward = [reward]
 
     else
