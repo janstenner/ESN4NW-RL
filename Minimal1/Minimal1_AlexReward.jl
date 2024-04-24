@@ -165,7 +165,7 @@ function do_step(env)
     power_for_free = 0.0
     for i in 1:n_turbines
 
-        # curtailment energy onlny when wind is above 0.5
+        # curtailment energy onlny when wind is above 0.4
         temp_free_power = (wind[i][step-1] - 0.4)*0.01
         temp_free_power = max(0.0, temp_free_power)
 
@@ -184,7 +184,7 @@ function do_step(env)
 
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 100
+        reward -= y[1] * 8
         env.reward = [reward]
 
     else
