@@ -114,8 +114,8 @@ y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 3.0
-nna_scale_critic = 6.0
+nna_scale = 2.3
+nna_scale_critic = 2.3
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
@@ -180,11 +180,11 @@ function do_step(env)
     reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*3)
 
     factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
-    reward = - (factor * reward1 + (1 - factor) * reward2) + power_for_free_used
+    reward = - (factor * reward1 + (1 - factor) * reward2) + (power_for_free_used * 40)^1.2
 
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 8
+        reward -= y[1] * 1000
         env.reward = [reward]
 
     else
