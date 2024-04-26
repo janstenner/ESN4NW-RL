@@ -48,6 +48,7 @@ state_dim = 4 + 2*n_turbines
 # env parameters
 
 seed = Int(floor(rand()*1000))
+# seed = 578
 
 gpu_env = false
 
