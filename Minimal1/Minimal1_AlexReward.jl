@@ -114,8 +114,8 @@ y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 2.3
-nna_scale_critic = 2.3
+nna_scale = 4.0
+nna_scale_critic = 6.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
@@ -184,7 +184,7 @@ function do_step(env)
 
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 1000
+        reward -= y[1] * 100
         env.reward = [reward]
 
     else
@@ -388,7 +388,7 @@ function train(use_random_init = true; visuals = false, num_steps = 4000, inner_
 
 
             println(hook.bestreward)
-            agent.policy.act_noise = agent.policy.act_noise * 0.4
+            agent.policy.act_noise = agent.policy.act_noise * 0.3
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
         end
