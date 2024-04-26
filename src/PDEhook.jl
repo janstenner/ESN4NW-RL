@@ -58,7 +58,7 @@ function (hook::PDEhook)(::PostActStage, agent, env)
         insertcols!(tmp, :timestep => env.steps)
         insertcols!(tmp, :action => [vec(env.action)])
         insertcols!(tmp, :p => [send_to_host(env.p)])
-        insertcols!(tmp, :y => [send_to_host(env.y)])
+        insertcols!(tmp, :y => [deepcopy(send_to_host(env.y))])
         insertcols!(tmp, :reward => [reward(env)])
         append!(hook.currentDF, tmp)
     end

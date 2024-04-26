@@ -24,7 +24,7 @@ include(pwd() * "/src/StopCondition.jl")
 dirpath = string(@__DIR__)
 open(dirpath * "/.gitignore", "w") do io
     println(io, "training_frames/*")
-    println(io, "saves/*")
+    #println(io, "saves/*")
 end
 
 

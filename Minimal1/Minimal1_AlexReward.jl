@@ -24,7 +24,7 @@ include(pwd() * "/src/StopCondition.jl")
 dirpath = string(@__DIR__)
 open(dirpath * "/.gitignore", "w") do io
     println(io, "training_frames/*")
-    println(io, "saves/*")
+    #println(io, "saves/*")
 end
 
 
@@ -114,8 +114,8 @@ y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 2.3
-nna_scale_critic = 2.3
+nna_scale = 3.5
+nna_scale_critic = 5.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
@@ -175,18 +175,20 @@ function do_step(env)
     compute_power_used -= power_for_free
     compute_power_used = max(0.0, compute_power_used)
 
-    reward1 = sqrt(50 * compute_power_used) * ((grid_price[step-1] + 0.2)^2) * 0.5
+    reward1 = (50 * compute_power_used)^0.9 * ((grid_price[step-1] + 0.2)^2) * 0.5 - 0.3 * compute_power_used * 100
 
     reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*3)
 
-    factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
-    reward = - (factor * reward1 + (1 - factor) * reward2) + (power_for_free_used * 40)^1.2
+    #factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
+    factor = sigmoid(grid_price[step-1] * 9 - 4.0)
 
+    reward_free = (power_for_free_used * 40)^1.2 + (grid_price[step-1])^1.2 * power_for_free_used * 10
+
+    reward = - (factor * reward1 + (1 - factor) * reward2) + reward_free
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 1000
+        reward -= y[1] * 100
         env.reward = [reward]
-
     else
         #reward shaping
         #reward = (-1) * abs((reward * 45))^2.2
@@ -281,7 +283,7 @@ function initialize_setup(;use_random_init = false)
                         learning_rate = learning_rate,
                         learning_rate_critic = learning_rate_critic)
 
-    global hook = PDEhook(min_best_episode = min_best_episode, use_random_init = use_random_init)
+    global hook = PDEhook(min_best_episode = min_best_episode, use_random_init = use_random_init, collect_history = true)
 end
 
 function generate_random_init()
@@ -388,7 +390,7 @@ function train(use_random_init = true; visuals = false, num_steps = 4000, inner_
 
 
             println(hook.bestreward)
-            agent.policy.act_noise = agent.policy.act_noise * 0.4
+            agent.policy.act_noise = agent.policy.act_noise * 0.5
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
         end
