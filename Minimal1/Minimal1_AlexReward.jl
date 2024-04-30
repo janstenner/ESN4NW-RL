@@ -60,13 +60,29 @@ min_best_episode = 1
 sim_space = Space(fill(0..1, (state_dim)))
 
 function generate_wind()
+    # wind_constant_day = rand()
+    # deviation = 1/5
+
+    # result = sin.(collect(LinRange(rand()*3+1, 4+rand()*4, Int(te/dt)+1)))
+
+    # for i in 1:4
+    #     result += sin.(collect(LinRange(rand()+4, 5+rand()*i*4, Int(te/dt)+1)))
+    # end
+
+    # result .-= minimum(result)
+    # result ./= maximum(result)
+    # result .*= deviation
+
+    # day_wind = sin.(collect(LinRange(wind_constant_day*2*pi, 2+wind_constant_day*2*pi, Int(te/dt)+1)))
+    # day_wind .+= 1.0
+    # day_wind ./= 4#
+
+    wind_constant_day = 1.6
     deviation = 1/5
 
-    result = sin.(collect(LinRange(rand()*3+1, 4+rand()*4, Int(te/dt)+1)))
+    result = sin.(collect(LinRange(3+1, 4+4, Int(te/dt)+1)))
 
-    for i in 1:4
-        result += sin.(collect(LinRange(rand()+4, 5+rand()*i*4, Int(te/dt)+1)))
-    end
+    result += sin.(collect(LinRange(4, 11, Int(te/dt)+1)))
 
     result .-= minimum(result)
     result ./= maximum(result)
@@ -85,10 +101,20 @@ function generate_wind()
     result
 end
 
+function generate_grid_price()
+
+    gp = (-sin.(collect(LinRange(rand()*1.5, 2+rand()*1.5, Int(te/dt)+1))) .+(1+rand()))
+
+    #fixed
+    gp = (-sin.(collect(LinRange(0, 2+1.5, Int(te/dt)+1))) .+(1.1))
+
+    clamp!(gp, -1, 1)
+
+    return gp
+end
+
 y0 = zeros(state_dim)
 y0[1] = 1.0
-
-wind_constant_day = rand()
 
 wind = [generate_wind() for i in 1:n_turbines]
 
@@ -100,8 +126,7 @@ wind = [generate_wind() for i in 1:n_turbines]
 # to_plot = [scatter(y=wind[i]) for i in 1:3]
 # plot(Vector{AbstractTrace}(to_plot), layout)
 
-grid_price = (-sin.(collect(LinRange(rand()*1.5, 2+rand()*1.5, Int(te/dt)+1))) .+(1+rand()))
-clamp!(grid_price, -1, 1)
+grid_price = generate_grid_price()
 # plot(grid_price)
 
 for i in 1:n_turbines
@@ -176,12 +201,13 @@ function do_step(env)
     compute_power_used -= power_for_free
     compute_power_used = max(0.0, compute_power_used)
 
-    reward1 = (50 * compute_power_used)^0.9 * ((grid_price[step-1] + 0.2)^2) * 0.5 - 0.3 * compute_power_used * 100
+    reward1 = (50 * compute_power_used)^0.9 * ((grid_price[step-1] + 0.2)^2) * 0.5 - 0.3 * compute_power_used * 70
 
-    reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*3)
+    reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*2)
 
     #factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
-    factor = sigmoid(grid_price[step-1] * 9 - 4.0)
+    #factor = sigmoid(grid_price[step-1] * 9 - 4.0)
+    factor = 1
 
     reward_free = (power_for_free_used * 40)^1.2 + (grid_price[step-1])^1.2 * power_for_free_used * 10
 
@@ -293,12 +319,9 @@ function generate_random_init()
     y0 = zeros(state_dim)
     y0[1] = 1.0
 
-    wind_constant_day = rand()
-
     wind = [generate_wind() for i in 1:n_turbines]
 
-    grid_price = (-sin.(collect(LinRange(rand()*1.5, 2+rand()*1.5, Int(te/dt)+1))) .+(1+rand()))
-    clamp!(grid_price, -1, 1)
+    grid_price = generate_grid_price()
 
     for i in 1:n_turbines
         y0[((i-1)*2)+2] = wind[i][2] - wind[i][1]
@@ -472,6 +495,8 @@ function render_run(use_best = false)
 
     while !env.done
         action = agent(env)
+
+        #action = env.y[6] < 0.27 ? [-1.0] : [1.0]
 
         env(action)
 

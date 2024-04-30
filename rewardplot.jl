@@ -1,3 +1,6 @@
+using LinearAlgebra
+using Flux
+using FFTW
 using PlotlyJS
 
 
@@ -6,12 +9,14 @@ function reward_function(grid_price, compute_power_used, power_for_free)
     compute_power_used -= power_for_free
     compute_power_used = max(0.0, compute_power_used)
 
-    reward1 = (50 * compute_power_used)^0.9 * ((grid_price + 0.2)^2) * 0.5 - 0.3 * compute_power_used * 100
+    reward1 = (50 * compute_power_used)^0.9 * ((grid_price + 0.2)^2) * 0.5 - 0.3 * compute_power_used * 70
 
-    reward2 = - (37 * compute_power_used^1.2) * (1-grid_price*3)
+    reward2 = - (37 * compute_power_used^1.2) * (1-grid_price*2)
 
     #factor = clamp(grid_price * 2 - 0.5, 0.0, 1.0)
     factor = sigmoid(grid_price * 9 - 4.0)
+    #factor = sigmoid(grid_price * 20 - 13.0)
+    factor = 1
 
 
     reward_free = (power_for_free_used * 40)^1.2 + (grid_price)^1.2 * power_for_free_used * 10
