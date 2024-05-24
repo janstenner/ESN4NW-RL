@@ -414,11 +414,7 @@ function train(use_random_init = true; visuals = false, num_steps = 4000, inner_
 
 
             println(hook.bestreward)
-<<<<<<< HEAD
-            agent.policy.act_noise = agent.policy.act_noise * 0.3
-=======
             agent.policy.act_noise = agent.policy.act_noise * 0.5
->>>>>>> 8366b29931b135de6f1b6731863e2655597579a1
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
         end
