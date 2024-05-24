@@ -1,28 +1,4 @@
-using LinearAlgebra
-using ReinforcementLearning
-using IntervalSets
-
-export PDEenv
-
-function create_y0(sim_space)
-    y0 = zeros(size(sim_space))
-
-    for i in CartesianIndices(y0)
-        is_in_range = true
-        for (idx, ele) in enumerate(Tuple(i))
-            if ele > 0.4 * size(y0)[idx]
-                is_in_range = false
-            end
-        end
-        if is_in_range
-            y0[i] = 1.0
-        end
-    end
-
-    return y0
-end
-
-mutable struct PDEenv <: AbstractEnv
+mutable struct GeneralEnv <: AbstractEnv
     te
     t0
     dt
@@ -60,7 +36,7 @@ mutable struct PDEenv <: AbstractEnv
     check_max_value
 end
 
-function PDEenv(; te = 2.0, 
+function GeneralEnv(; te = 2.0, 
                   t0 = 0.0, 
                   dt = 0.005, 
                   f = nothing,
@@ -113,7 +89,7 @@ function PDEenv(; te = 2.0,
     end
 
     if isnothing(y0)
-        y0 = use_gpu ? CuArray(create_y0(sim_space)) : create_y0(sim_space)
+        y0 = use_gpu ? CuArray(zeros(size(sim_space))) : zeros(size(sim_space))
     end
 
     y = y0
@@ -140,7 +116,7 @@ function PDEenv(; te = 2.0,
  
     done = false
 
-    PDEenv(te, 
+    GeneralEnv(te, 
            t0, 
            dt, 
            f,
@@ -168,18 +144,15 @@ function PDEenv(; te = 2.0,
            check_max_value)
 end
 
-RLBase.action_space(env::PDEenv) = env.action_space
-RLBase.state_space(env::PDEenv) = env.state_space
 
-# describe no_players for MA RL
-#RLBase.players(::BurgersEnv) = 
+action_space(env::GeneralEnv) = env.action_space
+state_space(env::GeneralEnv) = env.state_space
 
+reward(env::GeneralEnv) = env.reward
+is_terminated(env::GeneralEnv) = env.done
+state(env::GeneralEnv) = env.state
 
-RLBase.reward(env::PDEenv) = env.reward
-RLBase.is_terminated(env::PDEenv) = env.done
-RLBase.state(env::PDEenv) = env.state
-
-function RLBase.reset!(env::PDEenv)
+function reset!(env::GeneralEnv)
     env.y = env.y0
     env.state = env.featurize(env.y0, env.t0)
     env.action = env.action0
@@ -192,7 +165,7 @@ function RLBase.reset!(env::PDEenv)
     nothing
 end
 
-function (env::PDEenv)(action)
+function (env::GeneralEnv)(action)
     env.delta_action = action - env.action
     env.action = action
     

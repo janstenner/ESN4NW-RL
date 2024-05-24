@@ -1,16 +1,3 @@
-using ReinforcementLearning
-using Flux
-using StableRNGs
-using IntervalSets
-using Setfield: @set
-using Zygote: ignore
-using CUDA
-
-include(pwd() * "/src/custom_nna.jl")
-
-export create_agent, CustomDDPGPolicy
-
-
 function create_NNA(;na, ns, use_gpu, is_actor, init, copyfrom = nothing, nna_scale, drop_middle_layer, learning_rate = 0.001, fun = relu)
     nna_size_actor = Int(floor(10 * nna_scale))
     nna_size_critic = Int(floor(20 * nna_scale))
@@ -57,7 +44,9 @@ end
 
 
 function create_agent(;action_space, state_space, use_gpu, rng, y, p, batch_size,
-                    start_steps, start_policy, update_after, update_freq, update_loops = 1, reset_stage = POST_EPISODE_STAGE, act_limit, act_noise, nna_scale = 1, nna_scale_critic = nothing, drop_middle_layer = false, drop_middle_layer_critic = nothing, memory_size = 0, trajectory_length = 1000, mono = false, learning_rate = 0.001, learning_rate_critic = nothing, fun = relu, fun_critic = nothing)
+                    start_steps, start_policy, update_after, update_freq, update_loops = 1, reset_stage = POST_EPISODE_STAGE, act_limit,
+                    act_noise, noise_hold = 1,
+                    nna_scale = 1, nna_scale_critic = nothing, drop_middle_layer = false, drop_middle_layer_critic = nothing, memory_size = 0, trajectory_length = 1000, mono = false, learning_rate = 0.001, learning_rate_critic = nothing, fun = relu, fun_critic = nothing)
 
     isnothing(nna_scale_critic)         &&  (nna_scale_critic = nna_scale)
     isnothing(drop_middle_layer_critic) &&  (drop_middle_layer_critic = drop_middle_layer)
@@ -82,6 +71,9 @@ function create_agent(;action_space, state_space, use_gpu, rng, y, p, batch_size
     else
         reward_size = size(action_space)[1]
     end
+
+    actions = zeros(size(action_space))
+    last_noise = randn(rng, size(actions[1:end-memory_size,:])) .* act_noise
     
     Agent(
         policy = CustomDDPGPolicy(
@@ -108,6 +100,8 @@ function create_agent(;action_space, state_space, use_gpu, rng, y, p, batch_size
             reset_stage = reset_stage,
             act_limit = act_limit,
             act_noise = act_noise,
+            noise_hold = noise_hold,
+            last_noise = last_noise,
             memory_size = memory_size,
         ),
         trajectory = 
@@ -147,12 +141,15 @@ Base.@kwdef mutable struct CustomDDPGPolicy{
     reset_stage
     act_limit
     act_noise
+    noise_hold
+    last_noise
     memory_size
 
     update_step::Int = 0
     actor_loss::Float32 = 0.0f0
     critic_loss::Float32 = 0.0f0
 end
+
 
 Flux.functor(x::CustomDDPGPolicy) = (
     ba = x.behavior_actor,
@@ -178,7 +175,7 @@ function (policy::CustomDDPGPolicy)(env; learning = true, test = false)
         policy.start_policy(env)
     else
         D = device(policy.behavior_actor)
-        s = DynamicStyle(env) == SEQUENTIAL ? state(env) : state(env, player)
+        s = state(env)
 
         s = send_to_device(D, s)
         
@@ -195,7 +192,10 @@ function (policy::CustomDDPGPolicy)(env; learning = true, test = false)
         actions = actions |> send_to_host
 
         if learning
-            actions[1:end-policy.memory_size,:] += randn(policy.rng, size(actions[1:end-policy.memory_size,:])) .* policy.act_noise
+            if policy.update_step % policy.noise_hold == 0
+                policy.last_noise = randn(policy.rng, size(actions[1:end-policy.memory_size,:])) .* policy.act_noise
+            end
+            actions[1:end-policy.memory_size,:] += policy.last_noise
             actions = clamp.(actions, -policy.act_limit, policy.act_limit)
         else
             actions = clamp.(actions, -policy.act_limit, policy.act_limit)
@@ -211,7 +211,7 @@ function (policy::CustomDDPGPolicy)(stage::AbstractStage, env::AbstractEnv)
     nothing
 end
 
-function RLBase.update!(
+function update!(
     policy::CustomDDPGPolicy,
     traj::Trajectory,
     ::AbstractEnv,
@@ -222,7 +222,7 @@ function RLBase.update!(
     end
 end
 
-function RLBase.update!(
+function update!(
     policy::CustomDDPGPolicy,
     traj::Trajectory,
     ::AbstractEnv,
@@ -233,7 +233,7 @@ function RLBase.update!(
     end
 end
 
-function RLBase.update!(
+function update!(
     trajectory::AbstractTrajectory,
     p::CustomDDPGPolicy,
     ::AbstractEnv,
@@ -242,35 +242,29 @@ function RLBase.update!(
     
 end
 
-function RLBase.update!(
+function update!(
     trajectory::AbstractTrajectory,
     policy::CustomDDPGPolicy,
     env::AbstractEnv,
     ::PreActStage,
     action,
 )
-    s = policy isa NamedPolicy ? state(env, nameof(policy)) : state(env)
+    s = state(env)
 
     #We assume that action_space[2] == state_space[2]
     for i in 1:size(s)[2]
         push!(trajectory[:state], s[:,i])
         push!(trajectory[:action], action[:,i])
-        if haskey(trajectory, :legal_actions_mask)
-            lasm =
-                policy isa NamedPolicy ? legal_action_space_mask(env, nameof(policy)) :
-                legal_action_space_mask(env)
-            push!(trajectory[:legal_actions_mask], lasm)
-        end
     end
 end
 
-function RLBase.update!(
+function update!(
     trajectory::AbstractTrajectory,
     policy::CustomDDPGPolicy,
     env::AbstractEnv,
     ::PostActStage,
 )
-    r = policy isa NamedPolicy ? reward(env, nameof(policy)) : reward(env)
+    r = reward(env)
 
     #We assume that state_space[2] == size(r)[1]
     for i in 1:size(r)[1]
@@ -279,7 +273,7 @@ function RLBase.update!(
     end
 end
 
-function RLBase.update!(
+function update!(
     trajectory::AbstractTrajectory,
     policy::CustomDDPGPolicy,
     env::AbstractEnv,
@@ -288,33 +282,8 @@ function RLBase.update!(
     
 end
 
-#custom sample function
-function pde_sample(rng::AbstractRNG, t::AbstractTrajectory, s::BatchSampler, number_actuators::Int)
-    inds = rand(rng, 1:length(t)-number_actuators, s.batch_size)
-    pde_fetch!(s, t, inds, number_actuators)
-    inds, s.cache
-end
 
-function pde_fetch!(s::BatchSampler, t::Trajectory, inds::Vector{Int}, number_actuators::Int)
-
-    batch = NamedTuple{SARTS}((
-        (consecutive_view(t[x], inds) for x in SART)...,
-        consecutive_view(t[:state], inds .+ number_actuators),
-    ))
-
-    
-    if isnothing(s.cache)
-        s.cache = map(batch) do x
-            convert(Array, x)
-        end
-    else
-        map(s.cache, batch) do dest, src
-            copyto!(dest, src)
-        end
-    end
-end
-
-function RLBase.update!(
+function update!(
     policy::CustomDDPGPolicy,
     traj::Trajectory,
     ::AbstractEnv,
@@ -335,7 +304,7 @@ function RLBase.update!(
     end
 end
 
-function RLBase.update!(policy::CustomDDPGPolicy, batch::NamedTuple{SARTS})
+function update!(policy::CustomDDPGPolicy, batch::NamedTuple{SARTS})
     
     s, a, r, t, snext = batch
 
@@ -392,11 +361,7 @@ function RLBase.update!(policy::CustomDDPGPolicy, batch::NamedTuple{SARTS})
     end
 end
 
-struct ZeroPolicy <: AbstractPolicy
-    action_space
-end
 
-(p::ZeroPolicy)(env) = zeros(size(p.action_space))
 
 
 function create_chain(;na, ns, use_gpu, is_actor, init, copyfrom = nothing, nna_scale, drop_middle_layer, fun = relu)

@@ -1,11 +1,4 @@
-using ReinforcementLearning
-using DataFrames
-using Statistics
-using UnicodePlots:lineplot
-
-export PDEhook
-
-Base.@kwdef mutable struct PDEhook <: AbstractHook
+Base.@kwdef mutable struct GeneralHook <: AbstractHook
 
     rewards::Vector{Float64} = Float64[]
     rewards_compare::Vector{Float64} = Float64[]
@@ -15,12 +8,13 @@ Base.@kwdef mutable struct PDEhook <: AbstractHook
 
     is_display_on_exit::Bool = true
     display_after_episode = false
-    use_random_init::Bool = false
+    generate_random_init = nothing
     collect_history::Bool = false
     collect_NNA::Bool = true
     collect_bestDF::Bool = true
 
     min_best_episode = 0
+    early_success_possible = false
     bestNNA = nothing
     bestDF = DataFrame()
     bestreward = -1000000.0
@@ -32,53 +26,55 @@ Base.@kwdef mutable struct PDEhook <: AbstractHook
     error_detection = function(y) return false end
 end
 
-Base.getindex(h::PDEhook) = h.rewards
+Base.getindex(h::GeneralHook) = h.rewards
 
-function (hook::PDEhook)(::PreExperimentStage, agent, env)
+function (hook::GeneralHook)(::PreExperimentStage, agent, env)
     if hook.collect_NNA && hook.currentNNA === nothing
-        hook.currentNNA = []
-
-        for i in eachindex(agent.policy.actors)
-            push!(hook.currentNNA, deepcopy(agent.policy.actors[i]["behavior"]))
-        end
-
-        hook.bestNNA = deepcopy(hook.currentNNA)
+        hook.currentNNA = deepcopy(agent.policy.behavior_actor)
+        hook.bestNNA = deepcopy(agent.policy.behavior_actor)
     end
 end
 
-function (hook::PDEhook)(::PreEpisodeStage, agent, env)
-    if hook.use_random_init
-        env.y0 = generate_random_init()
+function (hook::GeneralHook)(::PreEpisodeStage, agent, env)
+    if !(isnothing(hook.generate_random_init))
+        env.y0 = hook.generate_random_init()
         env.y = env.y0
 
         env.state = env.featurize(; env = env)
     end
 end
 
-function (hook::PDEhook)(::PostActStage, agent, env)
+function (hook::GeneralHook)(::PreActStage, agent, env, action)
+
+end
+
+function (hook::GeneralHook)(::PostActStage, agent, env)
     hook.reward += mean(reward(env))
     push!(hook.rewards_all_timesteps, mean(reward(env)))
 
     if hook.collect_bestDF
         tmp = DataFrame()
         insertcols!(tmp, :timestep => env.steps)
-        insertcols!(tmp, :action => [vec(env.action)])
-        insertcols!(tmp, :p => [send_to_host(env.p)])
-        insertcols!(tmp, :y => [send_to_host(env.y)])
+        insertcols!(tmp, :action => [deepcopy(vec(env.action))])
+        insertcols!(tmp, :p => [deepcopy(send_to_host(env.p))])
+        insertcols!(tmp, :y => [deepcopy(send_to_host(env.y))])
         insertcols!(tmp, :reward => [reward(env)])
         append!(hook.currentDF, tmp)
     end
 end
 
-function (hook::PDEhook)(::PostEpisodeStage, agent, env)
-    if env.time >= env.te && hook.ep >= hook.min_best_episode
+function (hook::GeneralHook)(::PostEpisodeStage, agent, env)
+    end_successful = false
+    if hook.early_success_possible
+        end_successful = hook.ep >= hook.min_best_episode ? true : false
+    else
+        end_successful = (env.time >= env.t && hook.ep >= hook.min_best_episode) ? true : false
+    end
+
+    if end_successful
         push!(hook.rewards_compare, hook.reward)
         if hook.collect_NNA && length(hook.rewards_compare) >= 1 && hook.reward >= maximum(hook.rewards_compare)
-
-            for i in eachindex(agent.policy.actors)
-                copyto!(hook.bestNNA[i], agent.policy.actors[i]["behavior"])
-            end
-
+            copyto!(hook.bestNNA, agent.policy.behavior_actor)
             hook.bestreward = hook.reward
             hook.bestepisode = hook.ep
             if hook.collect_bestDF
@@ -104,9 +100,7 @@ function (hook::PDEhook)(::PostEpisodeStage, agent, env)
     hook.reward = 0
     
     if hook.collect_NNA
-        for i in eachindex(agent.policy.actors)
-            copyto!(hook.currentNNA[i], agent.policy.actors[i]["behavior"])
-        end
+        copyto!(hook.currentNNA, agent.policy.behavior_actor)
     end
 
     if hook.display_after_episode && !isempty(hook.rewards)
@@ -114,7 +108,7 @@ function (hook::PDEhook)(::PostEpisodeStage, agent, env)
     end
 end
 
-function (hook::PDEhook)(::PostExperimentStage, agent, env)
+function (hook::GeneralHook)(::PostExperimentStage, agent, env)
     if hook.is_display_on_exit && !isempty(hook.rewards)
         println(lineplot(hook.rewards, title="Total reward per episode", xlabel="Episode", ylabel="Score"))
     end

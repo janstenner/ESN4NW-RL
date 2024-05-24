@@ -1,17 +1,4 @@
-using ReinforcementLearning
-using Flux
-using StableRNGs
-using IntervalSets
-using Setfield: @set
-using Zygote: ignore
-using CUDA
-
-include(pwd() * "/src/custom_nna.jl")
-
-export create_agent, DDPGTeamPolicy
-
-
-function create_NNA(;na, ns, use_gpu, is_actor, init, copyfrom = nothing, nna_scale, drop_middle_layer, learning_rate = 0.001, fun = relu, num_actuators = 0, critic_window = 1)
+function create_NNA_Team(;na, ns, use_gpu, is_actor, init, copyfrom = nothing, nna_scale, drop_middle_layer, learning_rate = 0.001, fun = relu, num_actuators = 0, critic_window = 1)
     nna_size_actor = Int(floor(10 * nna_scale))
     nna_size_critic = Int(floor(20 * nna_scale))
 
@@ -57,7 +44,7 @@ function create_NNA(;na, ns, use_gpu, is_actor, init, copyfrom = nothing, nna_sc
 end
 
 
-function create_agent(;num_actuators, critic_window, critic_window_indexes, action_space, state_space, use_gpu,
+function create_agent_Team(;num_actuators, critic_window, critic_window_indexes, action_space, state_space, use_gpu,
                     rng, y, p, batch_size,
                     start_steps, start_policy, update_after, update_freq, update_loops = 1, reset_stage = POST_EPISODE_STAGE, act_limit,
                     act_noise, noise_hold = 1,
@@ -75,18 +62,18 @@ function create_agent(;num_actuators, critic_window, critic_window_indexes, acti
     for i in 1:num_actuators
         temp_dict = Dict()
 
-        temp_dict["behavior"] = create_NNA(na = size(action_space)[1], ns = size(state_space)[1], use_gpu = use_gpu, is_actor = true, init = init, nna_scale = nna_scale, drop_middle_layer = drop_middle_layer, learning_rate = learning_rate, fun = fun)
+        temp_dict["behavior"] = create_NNA_Team(na = size(action_space)[1], ns = size(state_space)[1], use_gpu = use_gpu, is_actor = true, init = init, nna_scale = nna_scale, drop_middle_layer = drop_middle_layer, learning_rate = learning_rate, fun = fun)
 
-        temp_dict["target"] = create_NNA(na = size(action_space)[1], ns = size(state_space)[1], use_gpu = use_gpu, is_actor = true, init = init, nna_scale = nna_scale, drop_middle_layer = drop_middle_layer, learning_rate = learning_rate, fun = fun)
+        temp_dict["target"] = create_NNA_Team(na = size(action_space)[1], ns = size(state_space)[1], use_gpu = use_gpu, is_actor = true, init = init, nna_scale = nna_scale, drop_middle_layer = drop_middle_layer, learning_rate = learning_rate, fun = fun)
 
         copyto!(temp_dict["behavior"], temp_dict["target"])  # force sync
 
         push!(actors, temp_dict)
     end
 
-    behavior_critic = create_NNA(na = size(action_space)[1], ns = size(state_space)[1], use_gpu = use_gpu, is_actor = false, init = init, nna_scale = nna_scale_critic, drop_middle_layer = drop_middle_layer_critic, learning_rate = learning_rate_critic, fun = fun_critic, num_actuators = num_actuators, critic_window = critic_window)
+    behavior_critic = create_NNA_Team(na = size(action_space)[1], ns = size(state_space)[1], use_gpu = use_gpu, is_actor = false, init = init, nna_scale = nna_scale_critic, drop_middle_layer = drop_middle_layer_critic, learning_rate = learning_rate_critic, fun = fun_critic, num_actuators = num_actuators, critic_window = critic_window)
 
-    target_critic = create_NNA(na = size(action_space)[1], ns = size(state_space)[1], use_gpu = use_gpu, is_actor = false, init = init, nna_scale = nna_scale_critic, drop_middle_layer = drop_middle_layer_critic, learning_rate = learning_rate_critic, fun = fun_critic, num_actuators = num_actuators, critic_window = critic_window)
+    target_critic = create_NNA_Team(na = size(action_space)[1], ns = size(state_space)[1], use_gpu = use_gpu, is_actor = false, init = init, nna_scale = nna_scale_critic, drop_middle_layer = drop_middle_layer_critic, learning_rate = learning_rate_critic, fun = fun_critic, num_actuators = num_actuators, critic_window = critic_window)
 
     copyto!(behavior_critic, target_critic)  # force sync
 
@@ -232,7 +219,7 @@ function (policy::DDPGTeamPolicy)(stage::AbstractStage, env::AbstractEnv)
     nothing
 end
 
-function RLBase.update!(
+function update!(
     policy::DDPGTeamPolicy,
     traj::Trajectory,
     ::AbstractEnv,
@@ -243,7 +230,7 @@ function RLBase.update!(
     end
 end
 
-function RLBase.update!(
+function update!(
     policy::DDPGTeamPolicy,
     traj::Trajectory,
     ::AbstractEnv,
@@ -254,7 +241,7 @@ function RLBase.update!(
     end
 end
 
-function RLBase.update!(
+function update!(
     trajectory::AbstractTrajectory,
     p::DDPGTeamPolicy,
     ::AbstractEnv,
@@ -263,7 +250,7 @@ function RLBase.update!(
     
 end
 
-function RLBase.update!(
+function update!(
     trajectory::AbstractTrajectory,
     policy::DDPGTeamPolicy,
     env::AbstractEnv,
@@ -276,7 +263,7 @@ function RLBase.update!(
     push!(trajectory[:action], action)
 end
 
-function RLBase.update!(
+function update!(
     trajectory::AbstractTrajectory,
     policy::DDPGTeamPolicy,
     env::AbstractEnv,
@@ -288,7 +275,7 @@ function RLBase.update!(
     push!(trajectory[:terminal], is_terminated(env))
 end
 
-function RLBase.update!(
+function update!(
     trajectory::AbstractTrajectory,
     policy::DDPGTeamPolicy,
     env::AbstractEnv,
@@ -323,7 +310,7 @@ function pde_fetch!(s::BatchSampler, t::Trajectory, inds::Vector{Int})
     end
 end
 
-function RLBase.update!(
+function update!(
     policy::DDPGTeamPolicy,
     traj::Trajectory,
     ::AbstractEnv,
@@ -338,7 +325,7 @@ function RLBase.update!(
     end
 end
 
-function RLBase.update!(policy::DDPGTeamPolicy, batch::NamedTuple{SARTS})
+function update!(policy::DDPGTeamPolicy, batch::NamedTuple{SARTS})
     
     s, a, r, t, snext = batch
 
@@ -433,9 +420,3 @@ function RLBase.update!(policy::DDPGTeamPolicy, batch::NamedTuple{SARTS})
     GC.gc()
     CUDA.reclaim()
 end
-
-struct ZeroPolicy <: AbstractPolicy
-    action_space
-end
-
-(p::ZeroPolicy)(env) = zeros(size(p.action_space))

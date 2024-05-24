@@ -1,13 +1,13 @@
 using LinearAlgebra
-using ReinforcementLearning
 using IntervalSets
 using StableRNGs
-using ReinforcementLearning:update!
 using SparseArrays
 using Conda
 using FFTW
 using PlotlyJS
 using FileIO, JLD2
+using Flux
+using Random
 #using Blink
 
 n_turbines = 1
@@ -15,10 +15,8 @@ n_turbines = 1
 
 scriptname = "Minimal1"
 
-include(pwd() * "/src/PDEagent.jl")
-include(pwd() * "/src/PDEenv.jl")
-include(pwd() * "/src/PDEhook.jl")
-include(pwd() * "/src/StopCondition.jl")
+include(pwd() * "/src/RL/RL.jl")
+# using .RL
 
 #dir variable
 dirpath = string(@__DIR__)
@@ -146,7 +144,7 @@ drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
 use_gpu = false
-action_space = Space(fill(-1..1, (action_dim)))
+actionspace = Space(fill(-1..1, (action_dim)))
 
 # additional agent parameters
 rng = StableRNG(seed)
@@ -155,7 +153,7 @@ y = 0.95f0
 p = 0.995f0
 batch_size = 10
 start_steps = -1
-start_policy = ZeroPolicy(action_space)
+start_policy = ZeroPolicy(actionspace)
 update_after = 10
 update_freq = 1
 update_loops = 10
@@ -270,24 +268,24 @@ function prepare_action(action0 = nothing, t0 = nothing; env = nothing)
 end
 
 
-# PDEenv can also take a custom y0 as a parameter. Example: PDEenv(y0=y0_sawtooth, ...)
+
 function initialize_setup(;use_random_init = false)
 
-    global env = PDEenv(do_step = do_step, 
+    global env = GeneralEnv(do_step = do_step, 
                 reward_function = reward_function,
                 featurize = featurize,
                 prepare_action = prepare_action,
                 y0 = y0,
                 te = te, t0 = t0, dt = dt, 
                 sim_space = sim_space, 
-                action_space = action_space,
+                action_space = actionspace,
                 oversampling = 1,
                 use_radau = false,
                 max_value = 1.0,
                 check_max_value = "nothing")
 
     global agent = create_agent(mono = true,
-                        action_space = action_space,
+                        action_space = actionspace,
                         state_space = env.state_space,
                         use_gpu = use_gpu, 
                         rng = rng,
@@ -310,7 +308,10 @@ function initialize_setup(;use_random_init = false)
                         learning_rate = learning_rate,
                         learning_rate_critic = learning_rate_critic)
 
-    global hook = PDEhook(min_best_episode = min_best_episode, use_random_init = use_random_init, collect_history = true)
+    global hook = GeneralHook(min_best_episode = min_best_episode,
+                            generate_random_init = generate_random_init,
+                            collect_history = true,
+                            early_success_possible = true)
 end
 
 function generate_random_init()
@@ -356,7 +357,11 @@ function train(use_random_init = true; visuals = false, num_steps = 4000, inner_
             )
     end
 
-    hook.use_random_init = use_random_init
+    if use_random_init
+        hook.generate_random_init = generate_random_init
+    else
+        hook.generate_random_init = false
+    end
     
 
     
