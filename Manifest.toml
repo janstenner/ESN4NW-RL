@@ -2,7 +2,7 @@
 
 julia_version = "1.10.3"
 manifest_format = "2.0"
-project_hash = "2a6908c35caeffcbdec933205ae148517e72b3cd"
+project_hash = "62d3c4782940b6c86a976a47d9914710dc285472"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -951,6 +951,12 @@ version = "1.10.0"
 [[deps.REPL]]
 deps = ["InteractiveUtils", "Markdown", "Sockets", "Unicode"]
 uuid = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
+
+[[deps.RL]]
+deps = ["Adapt", "CUDA", "CircularArrayBuffers", "DataFrames", "ElasticArrays", "Flux", "IntervalSets", "LinearAlgebra", "MacroTools", "ProgressMeter", "Random", "Setfield", "StableRNGs", "Statistics", "Test", "UnicodePlots", "Zygote", "cuDNN"]
+path = "C:\\Users\\Jan\\.julia\\dev\\RL"
+uuid = "88435259-3afc-4bfc-953c-ee5a97e5c988"
+version = "0.1.0"
 
 [[deps.Random]]
 deps = ["SHA"]

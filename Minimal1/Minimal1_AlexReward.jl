@@ -8,6 +8,7 @@ using PlotlyJS
 using FileIO, JLD2
 using Flux
 using Random
+using RL
 #using Blink
 
 n_turbines = 1
@@ -15,8 +16,8 @@ n_turbines = 1
 
 scriptname = "Minimal1"
 
-include(pwd() * "/src/RL/RL.jl")
-# using .RL
+
+
 
 #dir variable
 dirpath = string(@__DIR__)
