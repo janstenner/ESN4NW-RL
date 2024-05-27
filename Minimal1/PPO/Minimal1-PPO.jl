@@ -1,13 +1,14 @@
 using LinearAlgebra
-using ReinforcementLearning
 using IntervalSets
 using StableRNGs
-using ReinforcementLearning:update!
 using SparseArrays
 using Conda
 using FFTW
 using PlotlyJS
 using FileIO, JLD2
+using Flux
+using Random
+using RL
 #using Blink
 
 n_turbines = 1
@@ -15,10 +16,8 @@ n_turbines = 1
 
 scriptname = "Minimal1"
 
-include(pwd() * "/src/PDEagent.jl")
-include(pwd() * "/src/PDEenv.jl")
-include(pwd() * "/src/PDEhook.jl")
-include(pwd() * "/src/StopCondition.jl")
+
+
 
 #dir variable
 dirpath = string(@__DIR__)
@@ -48,6 +47,7 @@ state_dim = 4 + 2*n_turbines
 # env parameters
 
 seed = Int(floor(rand()*1000))
+# seed = 578
 
 gpu_env = false
 
@@ -59,13 +59,29 @@ min_best_episode = 1
 sim_space = Space(fill(0..1, (state_dim)))
 
 function generate_wind()
+    # wind_constant_day = rand()
+    # deviation = 1/5
+
+    # result = sin.(collect(LinRange(rand()*3+1, 4+rand()*4, Int(te/dt)+1)))
+
+    # for i in 1:4
+    #     result += sin.(collect(LinRange(rand()+4, 5+rand()*i*4, Int(te/dt)+1)))
+    # end
+
+    # result .-= minimum(result)
+    # result ./= maximum(result)
+    # result .*= deviation
+
+    # day_wind = sin.(collect(LinRange(wind_constant_day*2*pi, 2+wind_constant_day*2*pi, Int(te/dt)+1)))
+    # day_wind .+= 1.0
+    # day_wind ./= 4#
+
+    wind_constant_day = 1.6
     deviation = 1/5
 
-    result = sin.(collect(LinRange(rand()*3+1, 4+rand()*4, Int(te/dt)+1)))
+    result = sin.(collect(LinRange(3+1, 4+4, Int(te/dt)+1)))
 
-    for i in 1:4
-        result += sin.(collect(LinRange(rand()+4, 5+rand()*i*4, Int(te/dt)+1)))
-    end
+    result += sin.(collect(LinRange(4, 11, Int(te/dt)+1)))
 
     result .-= minimum(result)
     result ./= maximum(result)
@@ -84,10 +100,20 @@ function generate_wind()
     result
 end
 
+function generate_grid_price()
+
+    gp = (-sin.(collect(LinRange(rand()*1.5, 2+rand()*1.5, Int(te/dt)+1))) .+(1+rand()))
+
+    #fixed
+    gp = (-sin.(collect(LinRange(0, 2+1.5, Int(te/dt)+1))) .+(1.1))
+
+    clamp!(gp, -1, 1)
+
+    return gp
+end
+
 y0 = zeros(state_dim)
 y0[1] = 1.0
-
-wind_constant_day = rand()
 
 wind = [generate_wind() for i in 1:n_turbines]
 
@@ -99,8 +125,7 @@ wind = [generate_wind() for i in 1:n_turbines]
 # to_plot = [scatter(y=wind[i]) for i in 1:3]
 # plot(Vector{AbstractTrace}(to_plot), layout)
 
-grid_price = (-sin.(collect(LinRange(rand()*1.5, 2+rand()*1.5, Int(te/dt)+1))) .+(1+rand()))
-clamp!(grid_price, -1, 1)
+grid_price = generate_grid_price()
 # plot(grid_price)
 
 for i in 1:n_turbines
@@ -114,13 +139,13 @@ y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 2.3
-nna_scale_critic = 2.3
+nna_scale = 3.5
+nna_scale_critic = 5.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
 use_gpu = false
-action_space = Space(fill(-1..1, (action_dim)))
+actionspace = Space(fill(-1..1, (action_dim)))
 
 # additional agent parameters
 rng = StableRNG(seed)
@@ -129,7 +154,7 @@ y = 0.95f0
 p = 0.995f0
 batch_size = 10
 start_steps = -1
-start_policy = ZeroPolicy(action_space)
+start_policy = ZeroPolicy(actionspace)
 update_after = 10
 update_freq = 1
 update_loops = 10
@@ -175,18 +200,21 @@ function do_step(env)
     compute_power_used -= power_for_free
     compute_power_used = max(0.0, compute_power_used)
 
-    reward1 = sqrt(50 * compute_power_used) * ((grid_price[step-1] + 0.2)^2) * 0.5
+    reward1 = (50 * compute_power_used)^0.9 * ((grid_price[step-1] + 0.2)^2) * 0.5 - 0.3 * compute_power_used * 70
 
-    reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*3)
+    reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*2)
 
-    factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
-    reward = - (factor * reward1 + (1 - factor) * reward2) + (power_for_free_used * 40)^1.2
+    #factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
+    #factor = sigmoid(grid_price[step-1] * 9 - 4.0)
+    factor = 1
 
+    reward_free = (power_for_free_used * 40)^1.2 + (grid_price[step-1])^1.2 * power_for_free_used * 10
+
+    reward = - (factor * reward1 + (1 - factor) * reward2) + reward_free
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 1000
+        reward -= y[1] * 100
         env.reward = [reward]
-
     else
         #reward shaping
         #reward = (-1) * abs((reward * 45))^2.2
@@ -241,24 +269,24 @@ function prepare_action(action0 = nothing, t0 = nothing; env = nothing)
 end
 
 
-# PDEenv can also take a custom y0 as a parameter. Example: PDEenv(y0=y0_sawtooth, ...)
+
 function initialize_setup(;use_random_init = false)
 
-    global env = PDEenv(do_step = do_step, 
+    global env = GeneralEnv(do_step = do_step, 
                 reward_function = reward_function,
                 featurize = featurize,
                 prepare_action = prepare_action,
                 y0 = y0,
                 te = te, t0 = t0, dt = dt, 
                 sim_space = sim_space, 
-                action_space = action_space,
+                action_space = actionspace,
                 oversampling = 1,
                 use_radau = false,
                 max_value = 1.0,
                 check_max_value = "nothing")
 
     global agent = create_agent(mono = true,
-                        action_space = action_space,
+                        action_space = actionspace,
                         state_space = env.state_space,
                         use_gpu = use_gpu, 
                         rng = rng,
@@ -281,7 +309,10 @@ function initialize_setup(;use_random_init = false)
                         learning_rate = learning_rate,
                         learning_rate_critic = learning_rate_critic)
 
-    global hook = PDEhook(min_best_episode = min_best_episode, use_random_init = use_random_init)
+    global hook = GeneralHook(min_best_episode = min_best_episode,
+                            generate_random_init = generate_random_init,
+                            collect_history = true,
+                            early_success_possible = true)
 end
 
 function generate_random_init()
@@ -290,12 +321,9 @@ function generate_random_init()
     y0 = zeros(state_dim)
     y0[1] = 1.0
 
-    wind_constant_day = rand()
-
     wind = [generate_wind() for i in 1:n_turbines]
 
-    grid_price = (-sin.(collect(LinRange(rand()*1.5, 2+rand()*1.5, Int(te/dt)+1))) .+(1+rand()))
-    clamp!(grid_price, -1, 1)
+    grid_price = generate_grid_price()
 
     for i in 1:n_turbines
         y0[((i-1)*2)+2] = wind[i][2] - wind[i][1]
@@ -330,7 +358,11 @@ function train(use_random_init = true; visuals = false, num_steps = 4000, inner_
             )
     end
 
-    hook.use_random_init = use_random_init
+    if use_random_init
+        hook.generate_random_init = generate_random_init
+    else
+        hook.generate_random_init = false
+    end
     
 
     
@@ -388,7 +420,7 @@ function train(use_random_init = true; visuals = false, num_steps = 4000, inner_
 
 
             println(hook.bestreward)
-            agent.policy.act_noise = agent.policy.act_noise * 0.4
+            agent.policy.act_noise = agent.policy.act_noise * 0.5
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
         end
@@ -469,6 +501,8 @@ function render_run(use_best = false)
 
     while !env.done
         action = agent(env)
+
+        #action = env.y[6] < 0.27 ? [-1.0] : [1.0]
 
         env(action)
 
