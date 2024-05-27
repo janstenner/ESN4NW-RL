@@ -2,3 +2,5 @@ Manifest.toml
 
 frames/*
 video_output/*
+
+.vscode/*
