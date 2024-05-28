@@ -285,7 +285,7 @@ function initialize_setup(;use_random_init = false)
                 max_value = 1.0,
                 check_max_value = "nothing")
 
-    global agent = create_agent(mono = true,
+    global agent = create_agent_ppo(mono = true,
                         action_space = actionspace,
                         state_space = env.state_space,
                         use_gpu = use_gpu, 
