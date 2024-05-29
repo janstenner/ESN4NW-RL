@@ -150,8 +150,8 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.95f0
-p = 0.995f0
+y = 0.99f0
+p = 0.95f0
 batch_size = 10
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
@@ -285,31 +285,38 @@ function initialize_setup(;use_random_init = false)
                 max_value = 1.0,
                 check_max_value = "nothing")
 
-    global agent = create_agent_ppo(mono = true,
-                        action_space = actionspace,
-                        state_space = env.state_space,
-                        use_gpu = use_gpu, 
-                        rng = rng,
-                        y = y, p = p, batch_size = batch_size, 
-                        start_steps = start_steps, 
-                        start_policy = start_policy,
-                        update_after = update_after, 
-                        update_freq = update_freq,
-                        update_loops = update_loops,
-                        reset_stage = reset_stage,
-                        act_limit = act_limit, 
-                        act_noise = act_noise,
-                        nna_scale = nna_scale,
-                        nna_scale_critic = nna_scale_critic,
-                        drop_middle_layer = drop_middle_layer,
-                        drop_middle_layer_critic = drop_middle_layer_critic,
-                        fun = fun,
-                        memory_size = memory_size,
-                        trajectory_length = trajectory_length,
-                        learning_rate = learning_rate,
-                        learning_rate_critic = learning_rate_critic)
+        global agent = create_agent_ppo(action_space = actionspace,
+                state_space = env.state_space,
+                use_gpu = use_gpu, 
+                rng = rng,
+                y = y, p = p)
+
+    # global agent = create_agent_ppo(mono = true,
+    #                     action_space = actionspace,
+    #                     state_space = env.state_space,
+    #                     use_gpu = use_gpu, 
+    #                     rng = rng,
+    #                     y = y, p = p, batch_size = batch_size, 
+    #                     start_steps = start_steps, 
+    #                     start_policy = start_policy,
+    #                     update_after = update_after, 
+    #                     update_freq = update_freq,
+    #                     update_loops = update_loops,
+    #                     reset_stage = reset_stage,
+    #                     act_limit = act_limit, 
+    #                     act_noise = act_noise,
+    #                     nna_scale = nna_scale,
+    #                     nna_scale_critic = nna_scale_critic,
+    #                     drop_middle_layer = drop_middle_layer,
+    #                     drop_middle_layer_critic = drop_middle_layer_critic,
+    #                     fun = fun,
+    #                     memory_size = memory_size,
+    #                     trajectory_length = trajectory_length,
+    #                     learning_rate = learning_rate,
+    #                     learning_rate_critic = learning_rate_critic)
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
+                            collect_NNA = false,
                             generate_random_init = generate_random_init,
                             collect_history = true,
                             early_success_possible = true)
@@ -344,7 +351,7 @@ initialize_setup()
 
 # plotrun(use_best = false, plot3D = true)
 
-function train(use_random_init = true; visuals = false, num_steps = 4000, inner_loops = 5)
+function train(use_random_init = true; visuals = false, num_steps = 4000, inner_loops = 1)
     rm(dirpath * "/training_frames/", recursive=true, force=true)
     mkdir(dirpath * "/training_frames/")
     frame = 1
@@ -369,10 +376,9 @@ function train(use_random_init = true; visuals = false, num_steps = 4000, inner_
     outer_loops = 40
 
     for i = 1:outer_loops
-        agent.policy.act_noise = act_noise
+        
         for i = 1:inner_loops
             println("")
-            println(agent.policy.act_noise)
             stop_condition = StopAfterEpisodeWithMinSteps(num_steps)
 
 
@@ -420,7 +426,6 @@ function train(use_random_init = true; visuals = false, num_steps = 4000, inner_
 
 
             println(hook.bestreward)
-            agent.policy.act_noise = agent.policy.act_noise * 0.5
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
         end
