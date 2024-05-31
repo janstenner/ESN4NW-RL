@@ -9,6 +9,8 @@ using FileIO, JLD2
 using Flux
 using Random
 using RL
+using DataFrames
+using Statistics
 #using Blink
 
 n_turbines = 1
@@ -474,18 +476,18 @@ end
 
 
 function render_run(use_best = false)
-    if use_best
-        copyto!(agent.policy.behavior_actor, hook.bestNNA)
-    end
+    # if use_best
+    #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
+    # end
 
-    temp_noise = agent.policy.act_noise
-    agent.policy.act_noise = 0.0
+    # temp_noise = agent.policy.act_noise
+    # agent.policy.act_noise = 0.0
 
-    temp_start_steps = agent.policy.start_steps
-    agent.policy.start_steps  = -1
+    # temp_start_steps = agent.policy.start_steps
+    # agent.policy.start_steps  = -1
     
-    temp_update_after = agent.policy.update_after
-    agent.policy.update_after = 100000
+    # temp_update_after = agent.policy.update_after
+    # agent.policy.update_after = 100000
 
     agent.policy.update_step = 0
     global rewards = Float64[]
@@ -501,7 +503,7 @@ function render_run(use_best = false)
 
     global currentDF = DataFrame()
 
-    RLBase.reset!(env)
+    reset!(env)
     generate_random_init()
 
     while !env.done
@@ -531,13 +533,13 @@ function render_run(use_best = false)
         append!(hook.currentDF, tmp)
     end
 
-    if use_best
-        copyto!(agent.policy.behavior_actor, hook.currentNNA)
-    end
+    # if use_best
+    #     copyto!(agent.policy.behavior_actor, hook.currentNNA)
+    # end
 
-    agent.policy.start_steps = temp_start_steps
-    agent.policy.act_noise = temp_noise
-    agent.policy.update_after = temp_update_after
+    # agent.policy.start_steps = temp_start_steps
+    # agent.policy.act_noise = temp_noise
+    # agent.policy.update_after = temp_update_after
 
     println(reward_sum)
 

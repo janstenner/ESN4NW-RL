@@ -496,7 +496,7 @@ function render_run(use_best = false)
 
     global currentDF = DataFrame()
 
-    RLBase.reset!(env)
+    reset!(env)
     generate_random_init()
 
     while !env.done
