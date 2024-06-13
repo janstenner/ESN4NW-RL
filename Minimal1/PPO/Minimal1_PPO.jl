@@ -466,7 +466,7 @@ end
 
 
 
-function render_run(use_best = false; plot_optimal = false)
+function render_run(use_best = false; plot_optimal = false, steps = 6000)
     # if use_best
     #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
     # end
@@ -558,7 +558,7 @@ function render_run(use_best = false; plot_optimal = false)
     end
 
     if plot_optimal
-        optimal_actions = optimize_day(6000)
+        optimal_actions = optimize_day(steps)
         optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
 
         for k in 1:n_turbines
