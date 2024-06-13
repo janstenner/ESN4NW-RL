@@ -11,6 +11,8 @@ using Random
 using RL
 using DataFrames
 using Statistics
+using JuMP
+using Ipopt
 #using Blink
 
 n_turbines = 1
@@ -331,8 +333,8 @@ function generate_random_init()
     y0[1 + n_turbines * 2 + 1] = grid_price[2] - grid_price[1]
     y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
-    env.y0 = y0
-    env.y = env.y0
+    env.y0 = deepcopy(y0)
+    env.y = deepcopy(y0)
     env.state = env.featurize(; env = env)
 
     y0
@@ -464,7 +466,7 @@ end
 
 
 
-function render_run(use_best = false)
+function render_run(use_best = false; plot_optimal = false)
     # if use_best
     #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
     # end
@@ -544,13 +546,27 @@ function render_run(use_best = false)
                     ),
                 )
 
+    
+
     to_plot = [scatter(y=results["rewards"], name="reward", yaxis = "y2"),
                 scatter(y=results["loadleft"], name="load left"),
                 scatter(y=grid_price, name="grid price")]
+
     for k in 1:n_turbines
         push!(to_plot, scatter(y=results["hpc$k"], name="hpc$k"))
         push!(to_plot, scatter(y=wind[k], name="wind$k"))
     end
+
+    if plot_optimal
+        optimal_actions = optimize_day()
+        optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
+
+        for k in 1:n_turbines
+            push!(to_plot, scatter(y=optimal_actions[k,:], name="optimal_hpc$k"))
+        end
+        push!(to_plot, scatter(y=optimal_rewards, name="optimal_reward", yaxis = "y2"))
+    end
+
     plot(Vector{AbstractTrace}(to_plot), layout)
 
 end
@@ -559,3 +575,87 @@ end
 # t2 = scatter(y=rewards2)
 # t3 = scatter(y=rewards3)
 # plot([t1, t2, t3])
+
+
+
+function optimize_day()
+    model = Model(Ipopt.Optimizer)
+
+    @variable(model, 0 <= x[1:n_turbines, 1:Int(te/dt)] <= 1)
+
+    @constraint(model, sum(x) == 100.0)
+
+    @objective(model, Max, evaluate(x))
+
+    optimize!(model)
+
+    return value.(x)
+end
+
+
+
+# sum(actions) has to be 100
+
+function evaluate(actions; collect_rewards = false)
+    step = 2
+
+    reward_sum = 0.0
+    global rewards = Float64[]
+
+    for t in 1:Int(te/dt)
+
+        compute_power = 0.0
+        for i in 1:n_turbines
+            compute_power += actions[i,t]*0.01
+        end
+
+        compute_power_used = compute_power
+
+        # reward calculation
+        power_for_free = 0.0
+        for i in 1:n_turbines
+
+            # curtailment energy onlny when wind is above 0.4
+            temp_free_power = (wind[i][step-1] - 0.4)*0.01
+            temp_free_power = max(0.0, temp_free_power)
+
+            power_for_free += temp_free_power
+        end
+        power_for_free_used = min(power_for_free, compute_power_used)
+
+        # Hack for the Optimizer
+        compute_power_used -= power_for_free_used - 0.0000000001
+        power_for_free_used += 0.0000000001
+
+        # compute_power_used -= power_for_free
+        # compute_power_used = max(0.0, compute_power_used)
+        
+        
+
+        reward1 = (50 * compute_power_used)^0.9 * ((grid_price[step-1] + 0.2)^2) * 0.5 - 0.3 * compute_power_used * 70
+
+        reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*2)
+
+        #factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
+        #factor = sigmoid(grid_price[step-1] * 9 - 4.0)
+        factor = 1
+
+        reward_free = (power_for_free_used * 40)^1.2 + (grid_price[step-1])^1.2 * power_for_free_used * 10
+
+        reward = - (factor * reward1 + (1 - factor) * reward2) + reward_free
+
+        reward_sum += reward
+
+        if collect_rewards
+            push!(rewards, reward)
+        end
+
+        step += 1
+    end
+
+    if collect_rewards
+        rewards
+    else
+        reward_sum
+    end
+end
