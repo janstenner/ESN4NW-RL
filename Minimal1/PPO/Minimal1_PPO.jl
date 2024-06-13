@@ -558,13 +558,20 @@ function render_run(use_best = false; plot_optimal = false)
     end
 
     if plot_optimal
-        optimal_actions = optimize_day()
+        optimal_actions = optimize_day(6000)
         optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
 
         for k in 1:n_turbines
             push!(to_plot, scatter(y=optimal_actions[k,:], name="optimal_hpc$k"))
         end
         push!(to_plot, scatter(y=optimal_rewards, name="optimal_reward", yaxis = "y2"))
+
+
+        println("")
+        println("--------------------------------------------")
+        println("AGENT:   $reward_sum")
+        println("IPOPT:   $(sum(optimal_rewards))")
+        println("--------------------------------------------")
     end
 
     plot(Vector{AbstractTrace}(to_plot), layout)
@@ -578,8 +585,10 @@ end
 
 
 
-function optimize_day()
+function optimize_day(steps = 3000)
     model = Model(Ipopt.Optimizer)
+
+    set_optimizer_attribute(model, "max_iter", steps)
 
     @variable(model, 0 <= x[1:n_turbines, 1:Int(te/dt)] <= 1)
 
