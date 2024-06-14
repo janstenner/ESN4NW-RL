@@ -186,20 +186,12 @@ function do_step(env)
     compute_power_used -= power_for_free
     compute_power_used = max(0.0, compute_power_used)
 
-    reward1 = (50 * compute_power_used)^0.9 * ((grid_price[step-1] + 0.2)^2) * 0.5 - 0.3 * compute_power_used * 70
+    reward1 = compute_power_used * grid_price[step-1]
 
-    reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*2)
-
-    #factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
-    #factor = sigmoid(grid_price[step-1] * 9 - 4.0)
-    factor = 1
-
-    reward_free = (power_for_free_used * 40)^1.2 + (grid_price[step-1])^1.2 * power_for_free_used * 10
-
-    reward = - (factor * reward1 + (1 - factor) * reward2) + reward_free
+    reward = - reward1
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 100
+        reward -= y[1] * 2
         env.reward = [reward]
     else
         #reward shaping
@@ -633,25 +625,17 @@ function evaluate(actions; collect_rewards = false)
         power_for_free_used = min(power_for_free, compute_power_used)
 
         # Hack for the Optimizer
-        compute_power_used -= power_for_free_used - 0.0000000001
-        power_for_free_used += 0.0000000001
+        #compute_power_used -= power_for_free_used - 0.0000000001
+        #power_for_free_used += 0.0000000001
 
-        # compute_power_used -= power_for_free
-        # compute_power_used = max(0.0, compute_power_used)
+        compute_power_used -= power_for_free
+        compute_power_used = max(0.0000001, compute_power_used)
         
         
 
-        reward1 = (50 * compute_power_used)^0.9 * ((grid_price[step-1] + 0.2)^2) * 0.5 - 0.3 * compute_power_used * 70
+        reward1 = compute_power_used * grid_price[step-1]
 
-        reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*2)
-
-        #factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
-        #factor = sigmoid(grid_price[step-1] * 9 - 4.0)
-        factor = 1
-
-        reward_free = (power_for_free_used * 40)^1.2 + (grid_price[step-1])^1.2 * power_for_free_used * 10
-
-        reward = - (factor * reward1 + (1 - factor) * reward2) + reward_free
+        reward = - reward1 
 
         reward_sum += reward
 
