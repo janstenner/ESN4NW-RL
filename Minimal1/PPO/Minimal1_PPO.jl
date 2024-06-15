@@ -125,7 +125,7 @@ y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 3.5
+nna_scale = 5.0
 nna_scale_critic = 5.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
