@@ -51,7 +51,7 @@ state_dim = 4 + 2*n_turbines
 # env parameters
 
 seed = Int(floor(rand()*1000))
-# seed = 578
+seed = 178
 
 gpu_env = false
 
@@ -336,7 +336,7 @@ initialize_setup()
 
 # plotrun(use_best = false, plot3D = true)
 
-function train(use_random_init = true; visuals = false, num_steps = 40_000, inner_loops = 1)
+function train(use_random_init = true; visuals = false, num_steps = 288, inner_loops = 1)
     rm(dirpath * "/training_frames/", recursive=true, force=true)
     mkdir(dirpath * "/training_frames/")
     frame = 1
@@ -358,7 +358,7 @@ function train(use_random_init = true; visuals = false, num_steps = 40_000, inne
     
 
     
-    outer_loops = 40
+    outer_loops = 1
 
     for i = 1:outer_loops
         
@@ -652,3 +652,5 @@ function evaluate(actions; collect_rewards = false)
         reward_sum
     end
 end
+
+train(num_steps = 1047263)
