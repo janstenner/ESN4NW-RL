@@ -664,26 +664,152 @@ train(num_steps = 739200)
 # The next one will crash
 # train(num_steps = 1)
 
-hook(PRE_EXPERIMENT_STAGE, agent, env)
-agent(PRE_EXPERIMENT_STAGE, env)
+# hook(PRE_EXPERIMENT_STAGE, agent, env)
+# agent(PRE_EXPERIMENT_STAGE, env)
 
-reset!(env)
-agent(PRE_EPISODE_STAGE, env)
-hook(PRE_EPISODE_STAGE, agent, env)
+# reset!(env)
+# agent(PRE_EPISODE_STAGE, env)
+# hook(PRE_EPISODE_STAGE, agent, env)
 
-for i in 1:64
-    action = agent(env)
+# for i in 1:64
+#     action = agent(env)
 
-    agent(PRE_ACT_STAGE, env, action)
-    hook(PRE_ACT_STAGE, agent, env, action)
+#     agent(PRE_ACT_STAGE, env, action)
+#     hook(PRE_ACT_STAGE, agent, env, action)
 
-    env(action)
+#     env(action)
 
-    agent(POST_ACT_STAGE, env)
-    hook(POST_ACT_STAGE, agent, env)
+#     agent(POST_ACT_STAGE, env)
+#     hook(POST_ACT_STAGE, agent, env)
 
-end 
+# end 
 
 
 # next step crashes
 
+# action = agent(env)
+
+# agent(PRE_ACT_STAGE, env, action)
+# hook(PRE_ACT_STAGE, agent, env, action)
+
+# env(action)
+
+# agent(POST_ACT_STAGE, env)
+# hook(POST_ACT_STAGE, agent, env)
+
+
+# the following returns NaNs
+
+p = agent.policy
+
+t = agent.trajectory
+
+rng = p.rng
+AC = p.approximator
+γ = p.γ
+λ = p.λ
+n_epochs = p.n_epochs
+n_microbatches = p.n_microbatches
+clip_range = p.clip_range
+w₁ = p.actor_loss_weight
+w₂ = p.critic_loss_weight
+w₃ = p.entropy_loss_weight
+
+n_envs, n_rollout = size(t[:terminal])
+@assert n_envs * n_rollout % n_microbatches == 0 "size mismatch"
+microbatch_size = n_envs * n_rollout ÷ n_microbatches
+
+n = length(t)
+states_plus = t[:state]
+
+
+states_flatten_on_host = flatten_batch(select_last_dim(t[:state], 1:n))
+states_plus_values =
+    reshape(send_to_host(AC.critic(flatten_batch(states_plus))), n_envs, :)
+
+advantages = generalized_advantage_estimation(
+    t[:reward],
+    states_plus_values,
+    γ,
+    λ;
+    dims=2,
+    terminal=t[:terminal]
+)
+returns = advantages .+ select_last_dim(states_plus_values, 1:n_rollout)
+advantages = advantages
+
+actions_flatten = flatten_batch(select_last_dim(t[:action], 1:n))
+action_log_probs = select_last_dim(t[:action_log_prob], 1:n)
+
+
+using Zygote
+# TODO: normalize advantage
+if false
+    for epoch in 1:1
+        rand_inds = shuffle!(rng, Vector(1:n_envs*n_rollout))
+        for i in 1:4
+            global inds = rand_inds[(i-1)*microbatch_size+1:i*microbatch_size]
+
+            # s = to_device(select_last_dim(states_flatten_on_host, inds))
+            # !!! we need to convert it into a continuous CuArray otherwise CUDA.jl will complain scalar indexing
+            global s = collect(select_last_dim(states_flatten_on_host, inds))
+            global a = collect(select_last_dim(actions_flatten, inds))
+
+            if eltype(a) === Int
+                a = CartesianIndex.(a, 1:length(a))
+            end
+
+            global r = vec(returns)[inds]
+            global log_p = vec(action_log_probs)[inds]
+            global adv = vec(advantages)[inds]
+
+            global ps = Flux.params(AC.actor, AC.critic)
+            global gs = gradient(ps) do
+                global v′ = AC.critic(s) |> vec
+                if AC.actor isa GaussianNetwork
+                    global μ, logσ = AC.actor(s)
+                    if ndims(a) == 2
+                        global log_p′ₐ = vec(sum(normlogpdf(μ, exp.(logσ), a), dims=1))
+                    else
+                        global log_p′ₐ = normlogpdf(μ, exp.(logσ), a)
+                    end
+                    entropy_loss =
+                        mean(size(logσ, 1) * (log(2.0f0π) + 1) .+ sum(logσ; dims=1)) / 2
+                else
+                    # actor is assumed to return discrete logits
+                    logit′ = AC.actor(s)
+
+                    p′ = softmax(logit′)
+                    log_p′ = logsoftmax(logit′)
+                    log_p′ₐ = log_p′[a]
+                    entropy_loss = -sum(p′ .* log_p′) * 1 // size(p′, 2)
+                end
+                global ratio = exp.(log_p′ₐ .- log_p)
+                global surr1 = ratio .* adv
+                global surr2 = clamp.(ratio, 1.0f0 - clip_range, 1.0f0 + clip_range) .* adv
+
+                global actor_loss = -mean(min.(surr1, surr2))
+                critic_loss = mean((r .- v′) .^ 2)
+                loss = w₁ * actor_loss + w₂ * critic_loss - w₃ * entropy_loss
+
+                ignore() do
+                    p.actor_loss[i, epoch] = actor_loss
+                    p.critic_loss[i, epoch] = critic_loss
+                    p.entropy_loss[i, epoch] = entropy_loss
+                    p.loss[i, epoch] = loss
+                end
+
+                loss
+            end
+
+            p.norm[i, epoch] = clip_by_global_norm!(gs, ps, p.max_grad_norm)
+            
+            Flux.Optimise.update!(AC.optimizer, Flux.params(AC.actor), gs)
+            Flux.Optimise.update!(AC.optimizer, Flux.params(AC.critic), gs)
+        end
+    end
+end
+
+
+# THE CULPRIT!!!!!!!!!!!!!!!!!!!!!!!!!!
+# agent.trajectory[:action_log_prob][97]

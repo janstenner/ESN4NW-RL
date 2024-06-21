@@ -184,7 +184,8 @@ function do_step(env)
     end
     power_for_free_used = min(power_for_free, compute_power_used)
     compute_power_used -= power_for_free
-    compute_power_used = max(0.0, compute_power_used)
+    #compute_power_used = max(0.0, compute_power_used)
+    compute_power_used = log( 1 + exp(500* compute_power_used) ) / 500
 
     reward1 = compute_power_used * grid_price[step-1]
 
@@ -478,7 +479,7 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
 
     #w = Window()
 
-    results = Dict("rewards" => [], "loadleft" => [])
+    global results = Dict("rewards" => [], "loadleft" => [])
 
     for k in 1:n_turbines
         results["hpc$k"] = []
@@ -629,7 +630,8 @@ function evaluate(actions; collect_rewards = false)
         #power_for_free_used += 0.0000000001
 
         compute_power_used -= power_for_free
-        compute_power_used = max(0.0000001, compute_power_used)
+        #compute_power_used = max(0.0, compute_power_used)
+        compute_power_used = log( 1 + exp(500* compute_power_used) ) / 500
         
         
 
@@ -653,4 +655,4 @@ function evaluate(actions; collect_rewards = false)
     end
 end
 
-train(num_steps = 1047263)
+# train(num_steps = 1047263)
