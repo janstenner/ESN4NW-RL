@@ -144,14 +144,12 @@ batch_size = 10
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 update_after = 10
-update_freq = 1
+update_freq = 288
 update_loops = 10
 reset_stage = POST_EPISODE_STAGE
-learning_rate = 0.0002
-learning_rate_critic = 0.0005
-act_limit = 1.0
-act_noise = 1.2
-trajectory_length = 500_000
+learning_rate = 3e-4
+n_epochs = 10
+n_microbatches = 8
 
 
 
@@ -272,12 +270,16 @@ function initialize_setup(;use_random_init = false)
                 use_gpu = use_gpu, 
                 rng = rng,
                 y = y, p = p,
+                update_freq = update_freq,
+                learning_rate = learning_rate,
                 nna_scale = nna_scale,
                 nna_scale_critic = nna_scale_critic,
                 drop_middle_layer = drop_middle_layer,
                 drop_middle_layer_critic = drop_middle_layer_critic,
                 fun = fun,
-                clip1 = true)
+                clip1 = true,
+                n_epochs = 10,
+                n_microbatches = 8)
 
     # global agent = create_agent_ppo(mono = true,
     #                     action_space = actionspace,
