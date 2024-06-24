@@ -144,12 +144,12 @@ batch_size = 10
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 update_after = 10
-update_freq = 288
+update_freq = 256
 update_loops = 10
 reset_stage = POST_EPISODE_STAGE
-learning_rate = 3e-5
+learning_rate = 1e-5
 n_epochs = 4
-n_microbatches = 8
+n_microbatches = 4
 logσ_is_head = true
 
 
@@ -282,7 +282,7 @@ function initialize_setup(;use_random_init = false)
                 n_epochs = n_epochs,
                 n_microbatches = n_microbatches,
                 logσ_is_head = logσ_is_head)
-                
+
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
                             collect_NNA = false,
