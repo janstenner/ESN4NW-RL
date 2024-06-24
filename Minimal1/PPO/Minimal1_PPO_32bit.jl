@@ -147,9 +147,10 @@ update_after = 10
 update_freq = 288
 update_loops = 10
 reset_stage = POST_EPISODE_STAGE
-learning_rate = 3e-4
+learning_rate = 3e-5
 n_epochs = 4
 n_microbatches = 8
+logσ_is_head = true
 
 
 
@@ -279,31 +280,9 @@ function initialize_setup(;use_random_init = false)
                 fun = fun,
                 clip1 = true,
                 n_epochs = n_epochs,
-                n_microbatches = n_microbatches)
-
-    # global agent = create_agent_ppo(mono = true,
-    #                     action_space = actionspace,
-    #                     state_space = env.state_space,
-    #                     use_gpu = use_gpu, 
-    #                     rng = rng,
-    #                     y = y, p = p, batch_size = batch_size, 
-    #                     start_steps = start_steps, 
-    #                     start_policy = start_policy,
-    #                     update_after = update_after, 
-    #                     update_freq = update_freq,
-    #                     update_loops = update_loops,
-    #                     reset_stage = reset_stage,
-    #                     act_limit = act_limit, 
-    #                     act_noise = act_noise,
-    #                     nna_scale = nna_scale,
-    #                     nna_scale_critic = nna_scale_critic,
-    #                     drop_middle_layer = drop_middle_layer,
-    #                     drop_middle_layer_critic = drop_middle_layer_critic,
-    #                     fun = fun,
-    #                     memory_size = memory_size,
-    #                     trajectory_length = trajectory_length,
-    #                     learning_rate = learning_rate,
-    #                     learning_rate_critic = learning_rate_critic)
+                n_microbatches = n_microbatches,
+                logσ_is_head = logσ_is_head)
+                
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
                             collect_NNA = false,
