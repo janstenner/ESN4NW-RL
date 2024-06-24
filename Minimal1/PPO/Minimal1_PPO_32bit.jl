@@ -148,7 +148,7 @@ update_freq = 288
 update_loops = 10
 reset_stage = POST_EPISODE_STAGE
 learning_rate = 3e-4
-n_epochs = 10
+n_epochs = 4
 n_microbatches = 8
 
 
@@ -278,8 +278,8 @@ function initialize_setup(;use_random_init = false)
                 drop_middle_layer_critic = drop_middle_layer_critic,
                 fun = fun,
                 clip1 = true,
-                n_epochs = 10,
-                n_microbatches = 8)
+                n_epochs = n_epochs,
+                n_microbatches = n_microbatches)
 
     # global agent = create_agent_ppo(mono = true,
     #                     action_space = actionspace,
