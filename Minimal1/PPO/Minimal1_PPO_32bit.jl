@@ -51,7 +51,7 @@ state_dim = 4 + 2*n_turbines
 # env parameters
 
 seed = Int(floor(rand()*1000))
-# seed = 178
+# seed = 524
 
 gpu_env = false
 
@@ -638,4 +638,4 @@ function evaluate(actions; collect_rewards = false)
     end
 end
 
-train(num_steps = 140_000, inner_loops = 1600)
+train(num_steps = 40_000, inner_loops = 1600)
