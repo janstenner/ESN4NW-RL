@@ -580,6 +580,30 @@ end
 
 
 
+function smoothedReLu(x)
+    x *= 100_000
+
+    if x <= 0.0
+        result =  0.0
+    elseif x <= 0.5
+        result =   x^2
+    else
+        result =   x - 0.25
+    end
+
+    return result / 100_000
+end
+
+
+function softplus_shifted(x)
+    factor = 700
+    log( 1 + exp(factor * (x - 0.006)) ) / factor
+end
+
+xx = collect(-1:0.001:1)
+plot(scatter(y=softplus_shifted.(xx), x=xx))
+
+
 # sum(actions) has to be 100
 
 function evaluate(actions; collect_rewards = false)
@@ -592,17 +616,20 @@ function evaluate(actions; collect_rewards = false)
 
         compute_power = 0.0
         for i in 1:n_turbines
-            compute_power += actions[i,t]*0.01
+            compute_power += actions[i,t]
         end
 
         compute_power_used = compute_power
+
+        #normalizing
+        compute_power_used /= n_turbines
 
         # reward calculation
         power_for_free = 0.0
         for i in 1:n_turbines
 
             # curtailment energy onlny when wind is above 0.4
-            temp_free_power = (wind[i][step-1] - 0.4)*0.01
+            temp_free_power = (wind[i][step-1] - 0.4)
             temp_free_power = max(0.0, temp_free_power)
 
             power_for_free += temp_free_power
@@ -614,9 +641,12 @@ function evaluate(actions; collect_rewards = false)
         #power_for_free_used += 0.0000000001
 
         compute_power_used -= power_for_free
-        compute_power_used = max(0.0000001, compute_power_used)
+        #compute_power_used = max(0.0000001, compute_power_used)
+        compute_power_used = softplus_shifted(compute_power_used)
+        #compute_power_used = smoothedReLu(compute_power_used)
         
-        
+        #normalizing
+        compute_power_used *= (n_turbines * 0.01)
 
         reward1 = compute_power_used * grid_price[step-1]
 

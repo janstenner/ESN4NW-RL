@@ -595,6 +595,20 @@ function optimize_day(steps = 3000)
 end
 
 
+function smoothedReLu(x)
+    x *= 100_000
+
+    if x <= 0
+        result =  0.0
+    elseif x <= 0.5
+        result =   x^2
+    else
+        result =   x - 0.25
+    end
+
+    return result / 100_000
+end
+
 
 # sum(actions) has to be 100
 
@@ -631,7 +645,8 @@ function evaluate(actions; collect_rewards = false)
 
         compute_power_used -= power_for_free
         #compute_power_used = max(0.0, compute_power_used)
-        compute_power_used = log( 1 + exp(500* compute_power_used) ) / 500
+        #compute_power_used = log( 1 + exp(500* compute_power_used) ) / 500
+        compute_power_used = smoothedReLu(compute_power_used)
         
         
 
