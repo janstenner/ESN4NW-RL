@@ -154,18 +154,15 @@ rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
 p = 0.95f0
-batch_size = 10
+
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
-update_after = 10
-update_freq = 1
-update_loops = 10
-reset_stage = POST_EPISODE_STAGE
-learning_rate = 0.0002
-learning_rate_critic = 0.0005
-act_limit = 1.0
-act_noise = 1.2
-trajectory_length = 500_000
+
+update_freq = 256
+learning_rate = 2e-4
+n_epochs = 8
+n_microbatches = 8
+logσ_is_network = true
 
 
 
@@ -255,6 +252,8 @@ function featurize(y0 = nothing, t0 = nothing; env = nothing)
         y = env.y
     end
 
+    y = Float32.(y)
+
     return reshape(y, length(y), 1)
 end
 
@@ -275,24 +274,32 @@ end
 function initialize_setup(;use_random_init = false)
 
     global env = GeneralEnv(do_step = do_step, 
-                reward_function = reward_function,
-                featurize = featurize,
-                prepare_action = prepare_action,
-                y0 = y0,
-                te = te, t0 = t0, dt = dt, 
-                sim_space = sim_space, 
-                action_space = actionspace,
-                oversampling = 1,
-                use_radau = false,
-                max_value = 1.0,
-                check_max_value = "nothing")
+                    reward_function = reward_function,
+                    featurize = featurize,
+                    prepare_action = prepare_action,
+                    y0 = y0,
+                    te = te, t0 = t0, dt = dt, 
+                    sim_space = sim_space, 
+                    action_space = actionspace,
+                    max_value = 1.0,
+                    check_max_value = "nothing")
 
         global agent = create_agent_ppo(action_space = actionspace,
-                state_space = env.state_space,
-                use_gpu = use_gpu, 
-                rng = rng,
-                y = y, p = p,
-                clip1 = true)
+                    state_space = env.state_space,
+                    use_gpu = use_gpu, 
+                    rng = rng,
+                    y = y, p = p,
+                    update_freq = update_freq,
+                    learning_rate = learning_rate,
+                    nna_scale = nna_scale,
+                    nna_scale_critic = nna_scale_critic,
+                    drop_middle_layer = drop_middle_layer,
+                    drop_middle_layer_critic = drop_middle_layer_critic,
+                    fun = fun,
+                    clip1 = true,
+                    n_epochs = n_epochs,
+                    n_microbatches = n_microbatches,
+                    logσ_is_network = logσ_is_network)
 
     # global agent = create_agent_ppo(mono = true,
     #                     action_space = actionspace,
@@ -322,6 +329,7 @@ function initialize_setup(;use_random_init = false)
                             collect_NNA = false,
                             generate_random_init = generate_random_init,
                             collect_history = false,
+                            collect_rewards_all_timesteps = false,
                             early_success_possible = true)
 end
 
