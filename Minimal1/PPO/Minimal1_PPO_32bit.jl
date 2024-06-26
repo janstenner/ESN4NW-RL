@@ -150,7 +150,7 @@ reset_stage = POST_EPISODE_STAGE
 learning_rate = 1e-5
 n_epochs = 4
 n_microbatches = 4
-logσ_is_head = true
+logσ_is_head = false
 
 
 
