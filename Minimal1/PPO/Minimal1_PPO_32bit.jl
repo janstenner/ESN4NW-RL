@@ -149,6 +149,7 @@ learning_rate = 8e-6
 n_epochs = 4
 n_microbatches = 8
 logσ_is_network = true
+max_σ = 0.3f0
 
 
 
@@ -310,7 +311,8 @@ function initialize_setup(;use_random_init = false)
                 clip1 = true,
                 n_epochs = n_epochs,
                 n_microbatches = n_microbatches,
-                logσ_is_network = logσ_is_network)
+                logσ_is_network = logσ_is_network,
+                max_σ = max_σ)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
