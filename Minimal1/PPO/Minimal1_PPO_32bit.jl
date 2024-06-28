@@ -51,7 +51,7 @@ state_dim = 4 + 2*n_turbines
 # env parameters
 
 seed = Int(floor(rand()*1000))
-# seed = 524
+# seed = 800
 
 gpu_env = false
 
@@ -195,6 +195,8 @@ function do_step(env)
         env.done = true
     end
 
+    #normalizing
+    compute_power_used /= n_turbines
 
     # reward calculation
     power_for_free = 0.0
@@ -210,6 +212,11 @@ function do_step(env)
     compute_power_used -= power_for_free
     # compute_power_used = max(0.0, compute_power_used)
     compute_power_used = softplus_shifted(compute_power_used)
+
+
+    #normalizing
+    compute_power_used *= (n_turbines * 0.01)
+    
 
     reward1 = compute_power_used * grid_price[step-1]
 
