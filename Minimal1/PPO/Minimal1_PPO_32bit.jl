@@ -145,11 +145,36 @@ start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
 update_freq = 256
-learning_rate = 2e-4
-n_epochs = 8
+learning_rate = 8e-6
+n_epochs = 4
 n_microbatches = 8
 logσ_is_network = true
 
+
+
+
+function smoothedReLu(x)
+    x *= 100_000
+
+    if x <= 0.0
+        result =  0.0
+    elseif x <= 0.5
+        result =   x^2
+    else
+        result =   x - 0.25
+    end
+
+    return result / 100_000
+end
+
+
+function softplus_shifted(x)
+    factor = 700
+    log( 1 + exp(factor * (x - 0.006)) ) / factor
+end
+
+# xx = collect(-1:0.001:1)
+# plot(scatter(y=softplus_shifted.(xx), x=xx))
 
 
 function do_step(env)
@@ -183,7 +208,8 @@ function do_step(env)
     end
     power_for_free_used = min(power_for_free, compute_power_used)
     compute_power_used -= power_for_free
-    compute_power_used = max(0.0, compute_power_used)
+    # compute_power_used = max(0.0, compute_power_used)
+    compute_power_used = softplus_shifted(compute_power_used)
 
     reward1 = compute_power_used * grid_price[step-1]
 
@@ -578,28 +604,6 @@ end
 
 
 
-function smoothedReLu(x)
-    x *= 100_000
-
-    if x <= 0.0
-        result =  0.0
-    elseif x <= 0.5
-        result =   x^2
-    else
-        result =   x - 0.25
-    end
-
-    return result / 100_000
-end
-
-
-function softplus_shifted(x)
-    factor = 700
-    log( 1 + exp(factor * (x - 0.006)) ) / factor
-end
-
-xx = collect(-1:0.001:1)
-plot(scatter(y=softplus_shifted.(xx), x=xx))
 
 
 # sum(actions) has to be 100
