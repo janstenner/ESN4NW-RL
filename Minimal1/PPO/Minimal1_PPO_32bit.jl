@@ -196,14 +196,14 @@ function do_step(env)
     end
 
     #normalizing
-    compute_power_used /= n_turbines
+    compute_power_used *= 100/n_turbines
 
     # reward calculation
     power_for_free = 0.0
     for i in 1:n_turbines
 
         # curtailment energy onlny when wind is above 0.4
-        temp_free_power = (wind[i][step-1] - 0.4)*0.01
+        temp_free_power = (wind[i][step-1] - 0.4)
         temp_free_power = max(0.0, temp_free_power)
 
         power_for_free += temp_free_power
