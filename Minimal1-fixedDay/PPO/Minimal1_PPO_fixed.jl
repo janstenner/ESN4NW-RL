@@ -11,6 +11,8 @@ using Random
 using RL
 using DataFrames
 using Statistics
+using JuMP
+using Ipopt
 #using Blink
 
 n_turbines = 1
@@ -141,7 +143,7 @@ y0[1 + n_turbines * 2 + 2] = grid_price[2]
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 3.5
+nna_scale = 5.0
 nna_scale_critic = 5.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
@@ -152,18 +154,45 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.99f0
-p = 0.95f0
+y = 0.9997f0
+p = 0.995f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 256
-learning_rate = 2e-4
-n_epochs = 8
-n_microbatches = 8
-logσ_is_network = true
+update_freq = 800
+learning_rate = 2e-5
+n_epochs = 4
+n_microbatches = 16
+logσ_is_network = false
+max_σ = 0.3f0
+entropy_loss_weight = 0.02
 
+
+
+
+function smoothedReLu(x)
+    x *= 100_000
+
+    if x <= 0.0
+        result =  0.0
+    elseif x <= 0.5
+        result =   x^2
+    else
+        result =   x - 0.25
+    end
+
+    return result / 100_000
+end
+
+
+function softplus_shifted(x)
+    factor = 700
+    log( 1 + exp(factor * (x - 0.006)) ) / factor
+end
+
+# xx = collect(-1:0.001:1)
+# plot(scatter(y=softplus_shifted.(xx), x=xx))
 
 
 function do_step(env)
@@ -184,35 +213,35 @@ function do_step(env)
         env.done = true
     end
 
+    #normalizing
+    compute_power_used *= 100/n_turbines
 
     # reward calculation
     power_for_free = 0.0
     for i in 1:n_turbines
 
         # curtailment energy onlny when wind is above 0.4
-        temp_free_power = (wind[i][step-1] - 0.4)*0.01
+        temp_free_power = (wind[i][step-1] - 0.4)
         temp_free_power = max(0.0, temp_free_power)
 
         power_for_free += temp_free_power
     end
     power_for_free_used = min(power_for_free, compute_power_used)
     compute_power_used -= power_for_free
-    compute_power_used = max(0.0, compute_power_used)
+    # compute_power_used = max(0.0, compute_power_used)
+    compute_power_used = softplus_shifted(compute_power_used)
 
-    reward1 = (50 * compute_power_used)^0.9 * ((grid_price[step-1] + 0.2)^2) * 0.5 - 0.3 * compute_power_used * 70
 
-    reward2 = - (37 * compute_power_used^1.2) * (1-grid_price[step-1]*2)
+    #normalizing
+    compute_power_used *= (n_turbines * 0.01)
+    
 
-    #factor = clamp(grid_price[step-1] * 2 - 0.5, 0.0, 1.0)
-    #factor = sigmoid(grid_price[step-1] * 9 - 4.0)
-    factor = 1
+    reward1 = compute_power_used * grid_price[step-1]
 
-    reward_free = (power_for_free_used * 40)^1.2 + (grid_price[step-1])^1.2 * power_for_free_used * 10
-
-    reward = - (factor * reward1 + (1 - factor) * reward2) + reward_free
+    reward = - reward1
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 100
+        reward -= y[1] * 2
         env.reward = [reward]
     else
         #reward shaping
@@ -235,6 +264,8 @@ function do_step(env)
     y[1 + n_turbines * 2 + 2] = grid_price[step]
 
     y[1 + n_turbines * 2 + 3] = env.time / env.te
+
+    y = Float32.(y)
 
     return y
 end
@@ -299,7 +330,9 @@ function initialize_setup(;use_random_init = false)
                     clip1 = true,
                     n_epochs = n_epochs,
                     n_microbatches = n_microbatches,
-                    logσ_is_network = logσ_is_network)
+                    logσ_is_network = logσ_is_network,
+                    max_σ = max_σ,
+                    entropy_loss_weight = entropy_loss_weight)
 
     # global agent = create_agent_ppo(mono = true,
     #                     action_space = actionspace,
@@ -484,7 +517,7 @@ end
 
 
 
-function render_run(use_best = false)
+function render_run(use_best = false; plot_optimal = false, steps = 6000)
     # if use_best
     #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
     # end
@@ -564,13 +597,34 @@ function render_run(use_best = false)
                     ),
                 )
 
+    
+
     to_plot = [scatter(y=results["rewards"], name="reward", yaxis = "y2"),
                 scatter(y=results["loadleft"], name="load left"),
                 scatter(y=grid_price, name="grid price")]
+
     for k in 1:n_turbines
         push!(to_plot, scatter(y=results["hpc$k"], name="hpc$k"))
         push!(to_plot, scatter(y=wind[k], name="wind$k"))
     end
+
+    if plot_optimal
+        optimal_actions = optimize_day(steps)
+        optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
+
+        for k in 1:n_turbines
+            push!(to_plot, scatter(y=optimal_actions[k,:], name="optimal_hpc$k"))
+        end
+        push!(to_plot, scatter(y=optimal_rewards, name="optimal_reward", yaxis = "y2"))
+
+
+        println("")
+        println("--------------------------------------------")
+        println("AGENT:   $reward_sum")
+        println("IPOPT:   $(sum(optimal_rewards))")
+        println("--------------------------------------------")
+    end
+
     plot(Vector{AbstractTrace}(to_plot), layout)
 
 end
@@ -579,3 +633,91 @@ end
 # t2 = scatter(y=rewards2)
 # t3 = scatter(y=rewards3)
 # plot([t1, t2, t3])
+
+
+
+function optimize_day(steps = 3000)
+    model = Model(Ipopt.Optimizer)
+
+    set_optimizer_attribute(model, "max_iter", steps)
+
+    @variable(model, 0 <= x[1:n_turbines, 1:Int(te/dt)] <= 1)
+
+    @constraint(model, sum(x) == 100.0)
+
+    @objective(model, Max, evaluate(x))
+
+    optimize!(model)
+
+    return value.(x)
+end
+
+
+
+
+
+# sum(actions) has to be 100
+
+function evaluate(actions; collect_rewards = false)
+    step = 2
+
+    reward_sum = 0.0
+    global rewards = Float64[]
+
+    for t in 1:Int(te/dt)
+
+        compute_power = 0.0
+        for i in 1:n_turbines
+            compute_power += actions[i,t]
+        end
+
+        compute_power_used = compute_power
+
+        #normalizing
+        compute_power_used /= n_turbines
+
+        # reward calculation
+        power_for_free = 0.0
+        for i in 1:n_turbines
+
+            # curtailment energy onlny when wind is above 0.4
+            temp_free_power = (wind[i][step-1] - 0.4)
+            temp_free_power = max(0.0, temp_free_power)
+
+            power_for_free += temp_free_power
+        end
+        power_for_free_used = min(power_for_free, compute_power_used)
+
+        # Hack for the Optimizer
+        #compute_power_used -= power_for_free_used - 0.0000000001
+        #power_for_free_used += 0.0000000001
+
+        compute_power_used -= power_for_free
+        #compute_power_used = max(0.0000001, compute_power_used)
+        compute_power_used = softplus_shifted(compute_power_used)
+        #compute_power_used = smoothedReLu(compute_power_used)
+        
+        #normalizing
+        compute_power_used *= (n_turbines * 0.01)
+
+        reward1 = compute_power_used * grid_price[step-1]
+
+        reward = - reward1 
+
+        reward_sum += reward
+
+        if collect_rewards
+            push!(rewards, reward)
+        end
+
+        step += 1
+    end
+
+    if collect_rewards
+        rewards
+    else
+        reward_sum
+    end
+end
+
+train(num_steps = 40_000, inner_loops = 1600)

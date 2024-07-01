@@ -91,7 +91,10 @@ end
 
 function generate_grid_price()
 
-    gp = (-sin.(collect(LinRange(rand()*1.5, 2+rand()*1.5, Int(te/dt)+1))) .+(1+rand()))
+    factor = 1.0;
+    # factor = 0.2;
+
+    gp = (-sin.(collect(LinRange(rand()*1.5*factor, 3+rand()*1.5*factor, Int(te/dt)+1))) .+(1+(rand()*factor)))
 
     clamp!(gp, -1, 1)
 
@@ -112,7 +115,7 @@ wind = [generate_wind() for i in 1:n_turbines]
 # plot(Vector{AbstractTrace}(to_plot), layout)
 
 grid_price = generate_grid_price()
-# plot(grid_price)
+# plot(scatter(y=grid_price), Layout(yaxis=attr(range=[0,1])))
 
 for i in 1:n_turbines
     y0[((i-1)*2)+2] = wind[i][2] - wind[i][1]
@@ -138,19 +141,19 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.99f0
-p = 0.95f0
+y = 0.9997f0
+p = 0.995f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 256
-learning_rate = 8e-6
+update_freq = 800
+learning_rate = 2e-5
 n_epochs = 4
-n_microbatches = 8
-logσ_is_network = true
+n_microbatches = 16
+logσ_is_network = false
 max_σ = 0.3f0
-
+entropy_loss_weight = 0.01
 
 
 
@@ -312,7 +315,8 @@ function initialize_setup(;use_random_init = false)
                 n_epochs = n_epochs,
                 n_microbatches = n_microbatches,
                 logσ_is_network = logσ_is_network,
-                max_σ = max_σ)
+                max_σ = max_σ,
+                entropy_loss_weight = entropy_loss_weight)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
