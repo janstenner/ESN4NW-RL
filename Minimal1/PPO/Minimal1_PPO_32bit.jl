@@ -66,17 +66,17 @@ function generate_wind()
     wind_constant_day = rand()
     deviation = 1/5
 
-    result = sin.(collect(LinRange(rand()*3+1, 4+rand()*4, Int(te/dt)+1)))
+    result = sign(randn()) * sin.(collect(LinRange(rand()*3+1, 4+rand()*4, Int(te/dt)+1)))
 
     for i in 1:4
-        result += sin.(collect(LinRange(rand()+4, 5+rand()*i*4, Int(te/dt)+1)))
+        result += sign(randn()) * sin.(collect(LinRange(rand()+4, 5+rand()*i*4, Int(te/dt)+1)))
     end
 
     result .-= minimum(result)
     result ./= maximum(result)
     result .*= deviation
 
-    day_wind = sin.(collect(LinRange(wind_constant_day*2*pi, 2+wind_constant_day*2*pi, Int(te/dt)+1)))
+    day_wind = sign(randn()) * sin.(collect(LinRange(wind_constant_day*2*pi, 2+wind_constant_day*2*pi, Int(te/dt)+1)))
     day_wind .+= 1.0
     day_wind ./= 4
     day_wind .+= 0.25
@@ -92,9 +92,9 @@ end
 function generate_grid_price()
 
     factor = 1.0;
-    factor = 0.4;
+    factor = 0.6;
 
-    gp = (-sin.(collect(LinRange(rand()*1.5*factor, 3+rand()*1.5*factor, Int(te/dt)+1))) .+(1+(rand()*factor)))
+    gp = (-sin.(collect(LinRange(rand()*1.5*factor, 2+rand()*2.5*factor, Int(te/dt)+1))) .+(1+(rand()*factor)))
 
     clamp!(gp, -1, 1)
 
@@ -111,11 +111,11 @@ wind = [generate_wind() for i in 1:n_turbines]
 #                 yaxis=attr(range=[0,1]),
 #             )
 
-# to_plot = [scatter(y=wind[i]) for i in 1:3]
+# to_plot = [scatter(y=wind[i]) for i in 1:1]
 # plot(Vector{AbstractTrace}(to_plot), layout)
 
 grid_price = generate_grid_price()
-# plot(scatter(y=grid_price), Layout(yaxis=attr(range=[0,1])))
+plot(scatter(y=grid_price), Layout(yaxis=attr(range=[0,1])))
 
 for i in 1:n_turbines
     y0[((i-1)*2)+2] = wind[i][2] - wind[i][1]
