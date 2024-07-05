@@ -92,7 +92,7 @@ end
 function generate_grid_price()
 
     factor = 1.0;
-    # factor = 0.2;
+    factor = 0.4;
 
     gp = (-sin.(collect(LinRange(rand()*1.5*factor, 3+rand()*1.5*factor, Int(te/dt)+1))) .+(1+(rand()*factor)))
 
@@ -141,7 +141,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.9997f0
+y = 0.99997f0
 p = 0.995f0
 
 start_steps = -1

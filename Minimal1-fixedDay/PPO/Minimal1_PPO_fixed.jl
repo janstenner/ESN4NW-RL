@@ -154,19 +154,19 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.9997f0
+y = 0.99997f0
 p = 0.995f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
 update_freq = 800
-learning_rate = 2e-5
+learning_rate = 1e-5
 n_epochs = 4
 n_microbatches = 16
 logσ_is_network = false
 max_σ = 0.3f0
-entropy_loss_weight = 0.02
+entropy_loss_weight = 0.01
 
 
 
