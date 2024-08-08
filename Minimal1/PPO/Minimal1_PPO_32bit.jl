@@ -364,7 +364,7 @@ initialize_setup()
 
 # plotrun(use_best = false, plot3D = true)
 
-function train(use_random_init = true; visuals = false, num_steps = 288, inner_loops = 1)
+function train(use_random_init = true; visuals = false, num_steps = 287, inner_loops = 1, optimized_episodes  = 0, outer_loops = 1, steps = 2000)
     rm(dirpath * "/training_frames/", recursive=true, force=true)
     mkdir(dirpath * "/training_frames/")
     frame = 1
@@ -385,10 +385,7 @@ function train(use_random_init = true; visuals = false, num_steps = 288, inner_l
     end
     
 
-    
-    outer_loops = 1
-
-    for i = 1:outer_loops
+    for j = 1:outer_loops
         
         for i = 1:inner_loops
             println("")
@@ -442,6 +439,64 @@ function train(use_random_init = true; visuals = false, num_steps = 288, inner_l
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
         end
+
+
+        for i in 1:optimized_episodes
+            println("")
+
+            println("Starting optimized episodes learning...")
+
+            # run start
+            agent(PRE_EXPERIMENT_STAGE, env)
+            is_stop = false
+            while !is_stop
+                println("Optimized Episode $(i)...")
+                reset!(env)
+                agent(PRE_EPISODE_STAGE, env)
+
+                env.y0 = generate_random_init()
+                env.y = deepcopy(env.y0)
+                env.state = env.featurize(; env = env)
+
+                # generate optimal actions
+                optimal_actions = optimize_day(steps; verbose = false)
+                n = 1
+
+                while !is_terminated(env) # one episode
+                    # action = agent(env)
+
+                    if n <= size(optimal_actions)[2]
+                        action = optimal_actions[:,n]
+                    else
+                        # just in case y[1] is not exactly 0.0 due to numerical errors
+                        action = [ 0.001 ]
+                    end
+
+                    agent(PRE_ACT_STAGE, env, action)
+
+                    env(action)
+
+                    agent(POST_ACT_STAGE, env)
+
+                    if visuals
+                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
+
+                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
+                    end
+
+                    frame += 1
+                    n += 1
+                end # end of an episode
+
+                if is_terminated(env)
+                    agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
+                end
+
+                is_stop = true
+            end
+        end
+
+
     end
 
     if visuals && false
@@ -605,8 +660,12 @@ end
 
 
 
-function optimize_day(steps = 3000)
+function optimize_day(steps = 3000; verbose = true)
     model = Model(Ipopt.Optimizer)
+
+    if !verbose
+        set_silent(model)
+    end
 
     set_optimizer_attribute(model, "max_iter", steps)
 
@@ -689,4 +748,4 @@ function evaluate(actions; collect_rewards = false)
     end
 end
 
-train(num_steps = 40_000, inner_loops = 1600)
+train(num_steps = 14300, inner_loops = 2, optimized_episodes = 20, outer_loops = 10)
