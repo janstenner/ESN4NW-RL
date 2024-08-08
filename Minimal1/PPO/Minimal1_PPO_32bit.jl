@@ -40,11 +40,11 @@ action_dim = n_turbines
 # state vector
 
 # - amount of computation left (starts at 1.0 and goes to 0.0)
-# - wind stituation at every turbine (gradient of power output and current power output)
-# - current gradtient and price of energy from the grid
+# - wind stituation at every turbine (gradient of power output, current power output and curtailment enegry)
+# - current gradient and price of energy from the grid
 # - current time
 
-state_dim = 4 + 2*n_turbines
+state_dim = 4 + 3*n_turbines
 
 
 
@@ -101,7 +101,7 @@ function generate_grid_price()
     return gp
 end
 
-y0 = zeros(state_dim)
+y0 = zeros(1)
 y0[1] = 1.0
 
 wind = [generate_wind() for i in 1:n_turbines]
@@ -118,12 +118,15 @@ grid_price = generate_grid_price()
 plot(scatter(y=grid_price), Layout(yaxis=attr(range=[0,1])))
 
 for i in 1:n_turbines
-    y0[((i-1)*2)+2] = wind[i][2] - wind[i][1]
-    y0[((i-1)*2)+3] = wind[i][2] 
+    push!(y0, wind[i][2] - wind[i][1])
+    push!(y0, wind[i][2])
+    push!(y0, wind[i][2] - 0.4)
 end
 
-y0[1 + n_turbines * 2 + 1] = grid_price[2] - grid_price[1]
-y0[1 + n_turbines * 2 + 2] = grid_price[2]
+push!(y0, grid_price[2] - grid_price[1])
+push!(y0, grid_price[2])
+
+push!(y0, 0.0)
 
 y0 = Float32.(y0)
 
@@ -182,7 +185,7 @@ end
 
 
 function do_step(env)
-    y = env.y
+    y = [ env.y[1] ]
     step = env.steps + 2
 
     compute_power = 0.0
@@ -242,14 +245,17 @@ function do_step(env)
 
     
     for i in 1:n_turbines
-        y[((i-1)*2)+2] = wind[i][step] - wind[i][step-1]
-        y[((i-1)*2)+3] = wind[i][step]
+        push!(y, wind[i][2] - wind[i][1])
+        push!(y, wind[i][2])
+        push!(y, wind[i][2] - 0.4)
     end
 
-    y[1 + n_turbines * 2 + 1] = grid_price[step] - grid_price[step-1]
-    y[1 + n_turbines * 2 + 2] = grid_price[step]
+    push!(y, grid_price[step] - grid_price[step-1])
+    push!(y, grid_price[step])
 
-    y[1 + n_turbines * 2 + 3] = env.time / env.te
+    push!(y, env.time / env.te)
+
+    
 
     y = Float32.(y)
 
