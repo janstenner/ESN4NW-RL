@@ -151,7 +151,7 @@ start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
 update_freq = 800
-learning_rate = 2e-5
+learning_rate = 1e-4
 n_epochs = 4
 n_microbatches = 16
 logσ_is_network = false
@@ -440,11 +440,10 @@ function train(use_random_init = true; visuals = false, num_steps = 287, inner_l
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
         end
 
+        println("")
+        println("Starting optimized episodes learning...")
 
         for i in 1:optimized_episodes
-            println("")
-
-            println("Starting optimized episodes learning...")
 
             # run start
             agent(PRE_EXPERIMENT_STAGE, env)
@@ -748,4 +747,4 @@ function evaluate(actions; collect_rewards = false)
     end
 end
 
-train(num_steps = 14300, inner_loops = 2, optimized_episodes = 20, outer_loops = 10)
+# train(num_steps = 14300, inner_loops = 2, optimized_episodes = 20, outer_loops = 100)
