@@ -133,8 +133,8 @@ y0 = Float32.(y0)
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 5.0
-nna_scale_critic = 5.0
+nna_scale = 12.0
+nna_scale_critic = 12.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
@@ -144,20 +144,26 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.99997f0
-p = 0.995f0
+y = 0.997f0
+p = 0.95f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 800
-learning_rate = 1e-4
-n_epochs = 4
+update_freq = 288
+
+
+learning_rate = 2e-4
+n_epochs = 7
 n_microbatches = 16
 logσ_is_network = false
-max_σ = 0.3f0
+max_σ = 10000.0f0
 entropy_loss_weight = 0.01
-
+clip_grad = 0.3
+target_kl = 0.1
+clip1 = false
+start_logσ = -1.2
+tanh_end = false
 
 
 function smoothedReLu(x)
@@ -230,17 +236,17 @@ function do_step(env)
     reward = - reward1
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 2
-        env.reward = [reward]
+        reward -= y[1] * 1
     else
         #reward shaping
         #reward = (-1) * abs((reward * 45))^2.2
 
         #delta_action punish
         # reward -= 0.002 * mean(abs.(env.delta_action))
-        env.reward = [reward]
         #clamp!(env.reward, -1.0, 0.0)
     end
+
+    env.reward = [ -(reward^2)]
     
 
     
@@ -285,6 +291,8 @@ function prepare_action(action0 = nothing, t0 = nothing; env = nothing)
         action = env.action
     end
 
+    clamp!(action, -1.0, 1.0)
+
     action = (action .+1) .*0.5
 
     return action
@@ -317,12 +325,16 @@ function initialize_setup(;use_random_init = false)
                 drop_middle_layer = drop_middle_layer,
                 drop_middle_layer_critic = drop_middle_layer_critic,
                 fun = fun,
-                clip1 = true,
+                clip1 = clip1,
                 n_epochs = n_epochs,
                 n_microbatches = n_microbatches,
                 logσ_is_network = logσ_is_network,
                 max_σ = max_σ,
-                entropy_loss_weight = entropy_loss_weight)
+                entropy_loss_weight = entropy_loss_weight,
+                clip_grad = clip_grad,
+                target_kl = target_kl,
+                start_logσ = start_logσ,
+                tanh_end = tanh_end,)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -364,7 +376,7 @@ initialize_setup()
 
 # plotrun(use_best = false, plot3D = true)
 
-function train(use_random_init = true; visuals = false, num_steps = 287, inner_loops = 1, optimized_episodes  = 0, outer_loops = 1, steps = 2000)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000)
     rm(dirpath * "/training_frames/", recursive=true, force=true)
     mkdir(dirpath * "/training_frames/")
     frame = 1
@@ -387,59 +399,6 @@ function train(use_random_init = true; visuals = false, num_steps = 287, inner_l
 
     for j = 1:outer_loops
         
-        for i = 1:inner_loops
-            println("")
-            stop_condition = StopAfterEpisodeWithMinSteps(num_steps)
-
-
-            # run start
-            hook(PRE_EXPERIMENT_STAGE, agent, env)
-            agent(PRE_EXPERIMENT_STAGE, env)
-            is_stop = false
-            while !is_stop
-                reset!(env)
-                agent(PRE_EPISODE_STAGE, env)
-                hook(PRE_EPISODE_STAGE, agent, env)
-
-                while !is_terminated(env) # one episode
-                    action = agent(env)
-
-                    agent(PRE_ACT_STAGE, env, action)
-                    hook(PRE_ACT_STAGE, agent, env, action)
-
-                    env(action)
-
-                    agent(POST_ACT_STAGE, env)
-                    hook(POST_ACT_STAGE, agent, env)
-
-                    if visuals
-                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
-
-                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
-                    end
-
-                    frame += 1
-
-                    if stop_condition(agent, env)
-                        is_stop = true
-                        break
-                    end
-                end # end of an episode
-
-                if is_terminated(env)
-                    agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
-                    hook(POST_EPISODE_STAGE, agent, env)
-                end
-            end
-            hook(POST_EXPERIMENT_STAGE, agent, env)
-            # run end
-
-
-            println(hook.bestreward)
-
-            # hook.rewards = clamp.(hook.rewards, -3000, 0)
-        end
-
         println("")
         println("Starting optimized episodes learning...")
 
@@ -493,6 +452,63 @@ function train(use_random_init = true; visuals = false, num_steps = 287, inner_l
 
                 is_stop = true
             end
+        end
+
+
+
+        for i = 1:inner_loops
+            println("")
+            stop_condition = StopAfterEpisodeWithMinSteps(num_steps)
+
+
+            # run start
+            hook(PRE_EXPERIMENT_STAGE, agent, env)
+            agent(PRE_EXPERIMENT_STAGE, env)
+            is_stop = false
+            while !is_stop
+                reset!(env)
+                agent(PRE_EPISODE_STAGE, env)
+                hook(PRE_EPISODE_STAGE, agent, env)
+
+                while !is_terminated(env) # one episode
+                    action = agent(env)
+
+                    agent(PRE_ACT_STAGE, env, action)
+                    hook(PRE_ACT_STAGE, agent, env, action)
+
+                    env(action)
+
+                    agent(POST_ACT_STAGE, env)
+                    hook(POST_ACT_STAGE, agent, env)
+
+                    if visuals
+                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
+
+                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
+                    end
+
+                    frame += 1
+
+                    if stop_condition(agent, env)
+                        is_stop = true
+                        break
+                    end
+                end # end of an episode
+
+                if is_terminated(env)
+                    agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
+                    hook(POST_EPISODE_STAGE, agent, env)
+                end
+            end
+            hook(POST_EXPERIMENT_STAGE, agent, env)
+            # run end
+
+
+            println(hook.bestreward)
+
+            # hook.rewards = clamp.(hook.rewards, -3000, 0)
+
+            render_run()
         end
 
 
@@ -648,7 +664,8 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
         println("--------------------------------------------")
     end
 
-    plot(Vector{AbstractTrace}(to_plot), layout)
+    p = plot(Vector{AbstractTrace}(to_plot), layout)
+    display(p)
 
 end
 
