@@ -50,7 +50,7 @@ state_dim = 4 + 3*n_turbines
 
 # env parameters
 
-seed = Int(floor(rand()*1000))
+seed = Int(floor(rand()*100000))
 # seed = 800
 
 gpu_env = false
@@ -132,8 +132,8 @@ y0 = Float32.(y0)
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 12.0
-nna_scale_critic = 12.0
+nna_scale = 42.0
+nna_scale_critic = 42.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
@@ -149,20 +149,21 @@ p = 0.95f0
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 288
+update_freq = 100
 
 
-learning_rate = 2e-4
-n_epochs = 7
-n_microbatches = 16
+learning_rate = 1e-4
+n_epochs = 3
+n_microbatches = 10
 logσ_is_network = false
 max_σ = 10000.0f0
 entropy_loss_weight = 0.01
 clip_grad = 0.3
 target_kl = 0.1
 clip1 = false
-start_logσ = -1.2
+start_logσ = -0.5
 tanh_end = false
+clip_range = 0.05f0
 
 
 function smoothedReLu(x)
@@ -333,7 +334,8 @@ function initialize_setup(;use_random_init = false)
                 clip_grad = clip_grad,
                 target_kl = target_kl,
                 start_logσ = start_logσ,
-                tanh_end = tanh_end,)
+                tanh_end = tanh_end,
+                clip_range = clip_range)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -377,7 +379,7 @@ initialize_setup()
 
 # plotrun(use_best = false, plot3D = true)
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 10_000)
     rm(dirpath * "/training_frames/", recursive=true, force=true)
     mkdir(dirpath * "/training_frames/")
     frame = 1
@@ -456,6 +458,58 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
         end
 
 
+        if only_wind_steps > 0
+            println("")
+            println("Starting only wind learning...")
+            stop_condition = StopAfterEpisodeWithMinSteps(only_wind_steps)
+
+            global grid_price
+            grid_price = ones(size(grid_price))
+
+            # run start
+            hook(PRE_EXPERIMENT_STAGE, agent, env)
+            agent(PRE_EXPERIMENT_STAGE, env)
+            is_stop = false
+            while !is_stop
+                reset!(env)
+                agent(PRE_EPISODE_STAGE, env)
+                hook(PRE_EPISODE_STAGE, agent, env)
+
+
+
+                while !is_terminated(env) # one episode
+                    action = agent(env)
+
+                    agent(PRE_ACT_STAGE, env, action)
+                    hook(PRE_ACT_STAGE, agent, env, action)
+
+                    env(action)
+
+                    agent(POST_ACT_STAGE, env)
+                    hook(POST_ACT_STAGE, agent, env)
+
+                    if visuals
+                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
+
+                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
+                    end
+
+                    frame += 1
+
+                    if stop_condition(agent, env)
+                        is_stop = true
+                        break
+                    end
+                end # end of an episode
+
+                if is_terminated(env)
+                    agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
+                    hook(POST_EPISODE_STAGE, agent, env)
+                end
+            end
+            hook(POST_EXPERIMENT_STAGE, agent, env)
+        end
+
 
         for i = 1:inner_loops
             println("")
@@ -520,7 +574,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
         run(`ffmpeg -framerate 16 -i $(dirpath * "/training_frames/a%05d.png") -c:v libx264 -crf 21 -an -pix_fmt yuv420p10le $(dirpath * "/training.mp4")`)
     end
 
-    save()
+    #save()
 end
 
 
