@@ -251,9 +251,9 @@ function do_step(env)
 
     
     for i in 1:n_turbines
-        push!(y, wind[i][2] - wind[i][1])
-        push!(y, wind[i][2])
-        push!(y, max(0.0, wind[i][2] - 0.4))
+        push!(y, wind[i][step] - wind[i][step-1])
+        push!(y, wind[i][step])
+        push!(y, max(0.0, wind[i][step] - 0.4))
     end
 
     push!(y, grid_price[step] - grid_price[step-1])

@@ -166,6 +166,10 @@ tanh_end = false
 clip_range = 0.05f0
 
 
+
+wind_only = false
+
+
 function smoothedReLu(x)
     x *= 100_000
 
@@ -191,6 +195,8 @@ end
 
 
 function do_step(env)
+    global wind_only
+    
     y = [ env.y[1] ]
     step = env.steps + 2
 
@@ -212,38 +218,50 @@ function do_step(env)
     compute_power_used *= 100/n_turbines
 
     # reward calculation
-    power_for_free = 0.0
-    for i in 1:n_turbines
+    if wind_only
+        tempreward = 0.0
+        for i in 1:n_turbines
+            # curtailment energy onlny when wind is above 0.4
+            temp_free_power = (wind[i][step-1] - 0.4)
+            temp_free_power = max(0.0, temp_free_power)
 
-        # curtailment energy onlny when wind is above 0.4
-        temp_free_power = (wind[i][step-1] - 0.4)
-        temp_free_power = max(0.0, temp_free_power)
-
-        power_for_free += temp_free_power
-    end
-    power_for_free_used = min(power_for_free, compute_power_used)
-    compute_power_used -= power_for_free
-    # compute_power_used = max(0.0, compute_power_used)
-    compute_power_used = softplus_shifted(compute_power_used)
-
-
-    #normalizing
-    compute_power_used *= (n_turbines * 0.01)
-    
-
-    reward1 = compute_power_used * grid_price[step-1]
-
-    reward = - reward1
-
-    if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 1
+            tempreward += abs( env.p[i] - temp_free_power )
+        end
+        reward = - tempreward
     else
-        #reward shaping
-        #reward = (-1) * abs((reward * 45))^2.2
+        power_for_free = 0.0
+        for i in 1:n_turbines
 
-        #delta_action punish
-        # reward -= 0.002 * mean(abs.(env.delta_action))
-        #clamp!(env.reward, -1.0, 0.0)
+            # curtailment energy onlny when wind is above 0.4
+            temp_free_power = (wind[i][step-1] - 0.4)
+            temp_free_power = max(0.0, temp_free_power)
+
+            power_for_free += temp_free_power
+        end
+        power_for_free_used = min(power_for_free, compute_power_used)
+        compute_power_used -= power_for_free
+        # compute_power_used = max(0.0, compute_power_used)
+        compute_power_used = softplus_shifted(compute_power_used)
+
+
+        #normalizing
+        compute_power_used *= (n_turbines * 0.01)
+        
+
+        reward1 = compute_power_used * grid_price[step-1]
+
+        reward = - reward1
+
+        if (env.time + env.dt) >= env.te 
+            reward -= y[1] * 1
+        else
+            #reward shaping
+            #reward = (-1) * abs((reward * 45))^2.2
+
+            #delta_action punish
+            # reward -= 0.002 * mean(abs.(env.delta_action))
+            #clamp!(env.reward, -1.0, 0.0)
+        end
     end
 
     #env.reward = [ -(reward^2)]
@@ -252,9 +270,9 @@ function do_step(env)
 
     
     for i in 1:n_turbines
-        push!(y, wind[i][2] - wind[i][1])
-        push!(y, wind[i][2])
-        push!(y, max(0.0, wind[i][2] - 0.4))
+        push!(y, wind[i][step] - wind[i][step-1])
+        push!(y, wind[i][step])
+        push!(y, max(0.0, wind[i][step] - 0.4))
     end
 
     push!(y, grid_price[step] - grid_price[step-1])
@@ -292,9 +310,9 @@ function prepare_action(action0 = nothing, t0 = nothing; env = nothing)
         action = env.action
     end
 
-    clamp!(action, -1.0, 1.0)
+    clamp!(action, 0.0, 1.0)
 
-    action = (action .+1) .*0.5
+    #action = (action .+1) .*0.5
 
     return action
 end
@@ -380,7 +398,62 @@ initialize_setup()
 
 # plotrun(use_best = false, plot3D = true)
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 10_000)
+function train_wind_only(num_steps = 10_000, loops = 10)
+    global wind_only
+    wind_only = true
+
+    for i = 1:loops
+        println("")
+        stop_condition = StopAfterEpisodeWithMinSteps(num_steps)
+
+
+        # run start
+        hook(PRE_EXPERIMENT_STAGE, agent, env)
+        agent(PRE_EXPERIMENT_STAGE, env)
+        is_stop = false
+        while !is_stop
+            reset!(env)
+            agent(PRE_EPISODE_STAGE, env)
+            hook(PRE_EPISODE_STAGE, agent, env)
+
+            while !is_terminated(env) # one episode
+                action = agent(env)
+
+                agent(PRE_ACT_STAGE, env, action)
+                hook(PRE_ACT_STAGE, agent, env, action)
+
+                env(action)
+
+                agent(POST_ACT_STAGE, env)
+                hook(POST_ACT_STAGE, agent, env)
+
+                if stop_condition(agent, env)
+                    is_stop = true
+                    break
+                end
+            end # end of an episode
+
+            if is_terminated(env)
+                agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
+                hook(POST_EPISODE_STAGE, agent, env)
+            end
+        end
+        hook(POST_EXPERIMENT_STAGE, agent, env)
+        # run end
+
+
+        println(hook.bestreward)
+
+        # hook.rewards = clamp.(hook.rewards, -3000, 0)
+
+        render_run()
+    end
+end
+
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 0)
+    global wind_only
+    wind_only = false
+    
     rm(dirpath * "/training_frames/", recursive=true, force=true)
     mkdir(dirpath * "/training_frames/")
     frame = 1
