@@ -132,8 +132,8 @@ y0 = Float32.(y0)
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 42.0
-nna_scale_critic = 42.0
+nna_scale = 20.0
+nna_scale_critic = 11.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
@@ -227,7 +227,7 @@ function do_step(env)
 
             tempreward += abs( env.p[i] - temp_free_power )
         end
-        reward = - tempreward
+        reward = - tempreward/288.0
     else
         power_for_free = 0.0
         for i in 1:n_turbines
@@ -253,7 +253,7 @@ function do_step(env)
         reward = - reward1
 
         if (env.time + env.dt) >= env.te 
-            reward -= y[1] * 1
+            reward -= y[1] * 2
         else
             #reward shaping
             #reward = (-1) * abs((reward * 45))^2.2
@@ -398,7 +398,7 @@ initialize_setup()
 
 # plotrun(use_best = false, plot3D = true)
 
-function train_wind_only(num_steps = 10_000, loops = 10)
+function train_wind_only(;num_steps = 10_000, loops = 10)
     global wind_only
     wind_only = true
 
@@ -637,7 +637,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
-            #render_run()
+            render_run()
         end
 
 
@@ -895,3 +895,13 @@ function evaluate(actions; collect_rewards = false)
 end
 
 # train(num_steps = 14300, inner_loops = 2, optimized_episodes = 20, outer_loops = 100)
+
+function plot_rewards(smoothing = 30)
+    to_plot = Float64[]
+    for i in smoothing:length(hook.rewards)
+        push!(to_plot, mean(hook.rewards[i+1-smoothing:i]))
+    end
+
+    p = plot(to_plot)
+    display(p)
+end

@@ -132,8 +132,8 @@ y0 = Float32.(y0)
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 42.0
-nna_scale_critic = 42.0
+nna_scale = 20.0
+nna_scale_critic = 11.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
@@ -379,7 +379,7 @@ initialize_setup()
 
 # plotrun(use_best = false, plot3D = true)
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 10_000)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 0)
     rm(dirpath * "/training_frames/", recursive=true, force=true)
     mkdir(dirpath * "/training_frames/")
     frame = 1
@@ -563,7 +563,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
-            #render_run()
+            render_run(;plot_optimal=true, steps=2000)
         end
 
 
@@ -820,3 +820,13 @@ function evaluate(actions; collect_rewards = false)
 end
 
 # train(num_steps = 14300, inner_loops = 2, optimized_episodes = 20, outer_loops = 100)
+
+function plot_rewards(smoothing = 30)
+    to_plot = Float64[]
+    for i in smoothing:length(hook.rewards)
+        push!(to_plot, mean(hook.rewards[i+1-smoothing:i]))
+    end
+
+    p = plot(to_plot)
+    display(p)
+end
