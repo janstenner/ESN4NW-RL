@@ -40,18 +40,18 @@ action_dim = n_turbines
 # state vector
 
 # - amount of computation left (starts at 1.0 and goes to 0.0)
-# - wind stituation at every turbine (gradient of power output and current power output)
-# - current gradtient and price of energy from the grid
+# - wind stituation at every turbine (gradient of power output, current power output and curtailment enegry)
+# - current gradient and price of energy from the grid
 # - current time
 
-state_dim = 4 + 2*n_turbines
+state_dim = 4 + 3*n_turbines
 
 
 
 # env parameters
 
-seed = Int(floor(rand()*1000))
-seed = 178
+seed = Int(floor(rand()*100000))
+# seed = 800
 
 gpu_env = false
 
@@ -66,17 +66,17 @@ function generate_wind()
     wind_constant_day = rand()
     deviation = 1/5
 
-    result = sin.(collect(LinRange(rand()*3+1, 4+rand()*4, Int(te/dt)+1)))
+    result = sign(randn()) * sin.(collect(LinRange(rand()*3+1, 4+rand()*4, Int(te/dt)+1)))
 
     for i in 1:4
-        result += sin.(collect(LinRange(rand()+4, 5+rand()*i*4, Int(te/dt)+1)))
+        result += sign(randn()) * sin.(collect(LinRange(rand()+4, 5+rand()*i*4, Int(te/dt)+1)))
     end
 
     result .-= minimum(result)
     result ./= maximum(result)
     result .*= deviation
 
-    day_wind = sin.(collect(LinRange(wind_constant_day*2*pi, 2+wind_constant_day*2*pi, Int(te/dt)+1)))
+    day_wind = sign(randn()) * sin.(collect(LinRange(wind_constant_day*2*pi, 2+wind_constant_day*2*pi, Int(te/dt)+1)))
     day_wind .+= 1.0
     day_wind ./= 4
     day_wind .+= 0.25
@@ -91,15 +91,17 @@ end
 
 function generate_grid_price()
 
-    gp = (-sin.(collect(LinRange(rand()*1.5, 2+rand()*1.5, Int(te/dt)+1))) .+(1+rand()))
+    factor = 1.0;
+    factor = 0.6;
+
+    gp = (-sin.(collect(LinRange(rand()*1.5*factor, 2+rand()*2.5*factor, Int(te/dt)+1))) .+(1+(rand()*factor)))
 
     clamp!(gp, -1, 1)
 
     return gp
 end
 
-y0 = zeros(state_dim)
-y0[1] = 1.0
+y0 = [1.0]
 
 wind = [generate_wind() for i in 1:n_turbines]
 
@@ -108,25 +110,30 @@ wind = [generate_wind() for i in 1:n_turbines]
 #                 yaxis=attr(range=[0,1]),
 #             )
 
-# to_plot = [scatter(y=wind[i]) for i in 1:3]
+# to_plot = [scatter(y=wind[i]) for i in 1:1]
 # plot(Vector{AbstractTrace}(to_plot), layout)
 
 grid_price = generate_grid_price()
-# plot(grid_price)
+plot(scatter(y=grid_price), Layout(yaxis=attr(range=[0,1])))
 
 for i in 1:n_turbines
-    y0[((i-1)*2)+2] = wind[i][2] - wind[i][1]
-    y0[((i-1)*2)+3] = wind[i][2] 
+    push!(y0, wind[i][2] - wind[i][1])
+    push!(y0, wind[i][2])
+    push!(y0, max(0.0, wind[i][2] - 0.4))
 end
 
-y0[1 + n_turbines * 2 + 1] = grid_price[2] - grid_price[1]
-y0[1 + n_turbines * 2 + 2] = grid_price[2]
+push!(y0, grid_price[2] - grid_price[1])
+push!(y0, grid_price[2])
+
+push!(y0, 0.0)
+
+y0 = Float32.(y0)
 
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 5.0
-nna_scale_critic = 5.0
+nna_scale = 42.0
+nna_scale_critic = 42.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = leakyrelu
@@ -136,25 +143,55 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.99f0
+y = 0.997f0
 p = 0.95f0
-batch_size = 10
+
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
-update_after = 10
-update_freq = 1
-update_loops = 10
-reset_stage = POST_EPISODE_STAGE
-learning_rate = 0.0002
-learning_rate_critic = 0.0005
-act_limit = 1.0
-act_noise = 1.2
-trajectory_length = 500_000
 
+update_freq = 100
+
+
+learning_rate = 1e-4
+n_epochs = 3
+n_microbatches = 10
+logσ_is_network = false
+max_σ = 10000.0f0
+entropy_loss_weight = 0.01
+clip_grad = 0.3
+target_kl = 0.1
+clip1 = false
+start_logσ = -0.5
+tanh_end = false
+clip_range = 0.05f0
+
+
+function smoothedReLu(x)
+    x *= 100_000
+
+    if x <= 0.0
+        result =  0.0
+    elseif x <= 0.5
+        result =   x^2
+    else
+        result =   x - 0.25
+    end
+
+    return result / 100_000
+end
+
+
+function softplus_shifted(x)
+    factor = 700
+    log( 1 + exp(factor * (x - 0.006)) ) / factor
+end
+
+# xx = collect(-1:0.001:1)
+# plot(scatter(y=softplus_shifted.(xx), x=xx))
 
 
 function do_step(env)
-    y = env.y
+    y = [ env.y[1] ]
     step = env.steps + 2
 
     compute_power = 0.0
@@ -171,50 +208,63 @@ function do_step(env)
         env.done = true
     end
 
+    #normalizing
+    compute_power_used *= 100/n_turbines
 
     # reward calculation
     power_for_free = 0.0
     for i in 1:n_turbines
 
         # curtailment energy onlny when wind is above 0.4
-        temp_free_power = (wind[i][step-1] - 0.4)*0.01
+        temp_free_power = (wind[i][step-1] - 0.4)
         temp_free_power = max(0.0, temp_free_power)
 
         power_for_free += temp_free_power
     end
     power_for_free_used = min(power_for_free, compute_power_used)
     compute_power_used -= power_for_free
-    #compute_power_used = max(0.0, compute_power_used)
-    compute_power_used = log( 1 + exp(500* compute_power_used) ) / 500
+    # compute_power_used = max(0.0, compute_power_used)
+    compute_power_used = softplus_shifted(compute_power_used)
+
+
+    #normalizing
+    compute_power_used *= (n_turbines * 0.01)
+    
 
     reward1 = compute_power_used * grid_price[step-1]
 
     reward = - reward1
 
     if (env.time + env.dt) >= env.te 
-        reward -= y[1] * 2
-        env.reward = [reward]
+        reward -= y[1] * 1
     else
         #reward shaping
         #reward = (-1) * abs((reward * 45))^2.2
 
         #delta_action punish
         # reward -= 0.002 * mean(abs.(env.delta_action))
-        env.reward = [reward]
         #clamp!(env.reward, -1.0, 0.0)
     end
+
+    #env.reward = [ -(reward^2)]
+    env.reward = [reward]
     
 
     
     for i in 1:n_turbines
-        y[((i-1)*2)+2] = wind[i][step] - wind[i][step-1]
-        y[((i-1)*2)+3] = wind[i][step]
+        push!(y, wind[i][2] - wind[i][1])
+        push!(y, wind[i][2])
+        push!(y, max(0.0, wind[i][2] - 0.4))
     end
 
-    y[1 + n_turbines * 2 + 1] = grid_price[step] - grid_price[step-1]
-    y[1 + n_turbines * 2 + 2] = grid_price[step]
+    push!(y, grid_price[step] - grid_price[step-1])
+    push!(y, grid_price[step])
 
-    y[1 + n_turbines * 2 + 3] = env.time / env.te
+    push!(y, env.time / env.te)
+
+    
+
+    y = Float32.(y)
 
     return y
 end
@@ -242,6 +292,8 @@ function prepare_action(action0 = nothing, t0 = nothing; env = nothing)
         action = env.action
     end
 
+    clamp!(action, -1.0, 1.0)
+
     action = (action .+1) .*0.5
 
     return action
@@ -259,8 +311,6 @@ function initialize_setup(;use_random_init = false)
                 te = te, t0 = t0, dt = dt, 
                 sim_space = sim_space, 
                 action_space = actionspace,
-                oversampling = 1,
-                use_radau = false,
                 max_value = 1.0,
                 check_max_value = "nothing")
 
@@ -269,36 +319,25 @@ function initialize_setup(;use_random_init = false)
                 use_gpu = use_gpu, 
                 rng = rng,
                 y = y, p = p,
+                update_freq = update_freq,
+                learning_rate = learning_rate,
                 nna_scale = nna_scale,
                 nna_scale_critic = nna_scale_critic,
                 drop_middle_layer = drop_middle_layer,
                 drop_middle_layer_critic = drop_middle_layer_critic,
                 fun = fun,
-                clip1 = true)
+                clip1 = clip1,
+                n_epochs = n_epochs,
+                n_microbatches = n_microbatches,
+                logσ_is_network = logσ_is_network,
+                max_σ = max_σ,
+                entropy_loss_weight = entropy_loss_weight,
+                clip_grad = clip_grad,
+                target_kl = target_kl,
+                start_logσ = start_logσ,
+                tanh_end = tanh_end,
+                clip_range = clip_range)
 
-    # global agent = create_agent_ppo(mono = true,
-    #                     action_space = actionspace,
-    #                     state_space = env.state_space,
-    #                     use_gpu = use_gpu, 
-    #                     rng = rng,
-    #                     y = y, p = p, batch_size = batch_size, 
-    #                     start_steps = start_steps, 
-    #                     start_policy = start_policy,
-    #                     update_after = update_after, 
-    #                     update_freq = update_freq,
-    #                     update_loops = update_loops,
-    #                     reset_stage = reset_stage,
-    #                     act_limit = act_limit, 
-    #                     act_noise = act_noise,
-    #                     nna_scale = nna_scale,
-    #                     nna_scale_critic = nna_scale_critic,
-    #                     drop_middle_layer = drop_middle_layer,
-    #                     drop_middle_layer_critic = drop_middle_layer_critic,
-    #                     fun = fun,
-    #                     memory_size = memory_size,
-    #                     trajectory_length = trajectory_length,
-    #                     learning_rate = learning_rate,
-    #                     learning_rate_critic = learning_rate_critic)
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
                             collect_NNA = false,
@@ -311,20 +350,24 @@ end
 function generate_random_init()
     global wind_constant_day, wind, grid_price
 
-    y0 = zeros(state_dim)
-    y0[1] = 1.0
+    y0 = [1.0]
 
     wind = [generate_wind() for i in 1:n_turbines]
 
     grid_price = generate_grid_price()
 
     for i in 1:n_turbines
-        y0[((i-1)*2)+2] = wind[i][2] - wind[i][1]
-        y0[((i-1)*2)+3] = wind[i][2] 
+        push!(y0, wind[i][2] - wind[i][1])
+        push!(y0, wind[i][2])
+        push!(y0, max(0.0, wind[i][2] - 0.4))
     end
     
-    y0[1 + n_turbines * 2 + 1] = grid_price[2] - grid_price[1]
-    y0[1 + n_turbines * 2 + 2] = grid_price[2]
+    push!(y0, grid_price[2] - grid_price[1])
+    push!(y0, grid_price[2])
+    
+    push!(y0, 0.0)
+
+    y0 = Float32.(y0)
 
     env.y0 = deepcopy(y0)
     env.y = deepcopy(y0)
@@ -337,7 +380,7 @@ initialize_setup()
 
 # plotrun(use_best = false, plot3D = true)
 
-function train(use_random_init = true; visuals = false, num_steps = 288, inner_loops = 1)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 10_000)
     rm(dirpath * "/training_frames/", recursive=true, force=true)
     mkdir(dirpath * "/training_frames/")
     frame = 1
@@ -358,11 +401,117 @@ function train(use_random_init = true; visuals = false, num_steps = 288, inner_l
     end
     
 
-    
-    outer_loops = 1
-
-    for i = 1:outer_loops
+    for j = 1:outer_loops
         
+        println("")
+        println("Starting optimized episodes learning...")
+
+        for i in 1:optimized_episodes
+
+            # run start
+            agent(PRE_EXPERIMENT_STAGE, env)
+            is_stop = false
+            while !is_stop
+                println("Optimized Episode $(i)...")
+                reset!(env)
+                agent(PRE_EPISODE_STAGE, env)
+
+                env.y0 = generate_random_init()
+                env.y = deepcopy(env.y0)
+                env.state = env.featurize(; env = env)
+
+                # generate optimal actions
+                optimal_actions = optimize_day(steps; verbose = false)
+                n = 1
+
+                while !is_terminated(env) # one episode
+                    # action = agent(env)
+
+                    if n <= size(optimal_actions)[2]
+                        action = optimal_actions[:,n]
+                    else
+                        # just in case y[1] is not exactly 0.0 due to numerical errors
+                        action = [ 0.001 ]
+                    end
+
+                    agent(PRE_ACT_STAGE, env, action)
+
+                    env(action)
+
+                    agent(POST_ACT_STAGE, env)
+
+                    if visuals
+                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
+
+                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
+                    end
+
+                    frame += 1
+                    n += 1
+                end # end of an episode
+
+                if is_terminated(env)
+                    agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
+                end
+
+                is_stop = true
+            end
+        end
+
+
+        if only_wind_steps > 0
+            println("")
+            println("Starting only wind learning...")
+            stop_condition = StopAfterEpisodeWithMinSteps(only_wind_steps)
+
+            global grid_price
+            grid_price = ones(size(grid_price))
+
+            # run start
+            hook(PRE_EXPERIMENT_STAGE, agent, env)
+            agent(PRE_EXPERIMENT_STAGE, env)
+            is_stop = false
+            while !is_stop
+                reset!(env)
+                agent(PRE_EPISODE_STAGE, env)
+                hook(PRE_EPISODE_STAGE, agent, env)
+
+
+
+                while !is_terminated(env) # one episode
+                    action = agent(env)
+
+                    agent(PRE_ACT_STAGE, env, action)
+                    hook(PRE_ACT_STAGE, agent, env, action)
+
+                    env(action)
+
+                    agent(POST_ACT_STAGE, env)
+                    hook(POST_ACT_STAGE, agent, env)
+
+                    if visuals
+                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
+
+                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
+                    end
+
+                    frame += 1
+
+                    if stop_condition(agent, env)
+                        is_stop = true
+                        break
+                    end
+                end # end of an episode
+
+                if is_terminated(env)
+                    agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
+                    hook(POST_EPISODE_STAGE, agent, env)
+                end
+            end
+            hook(POST_EXPERIMENT_STAGE, agent, env)
+        end
+
+
         for i = 1:inner_loops
             println("")
             stop_condition = StopAfterEpisodeWithMinSteps(num_steps)
@@ -414,7 +563,11 @@ function train(use_random_init = true; visuals = false, num_steps = 288, inner_l
             println(hook.bestreward)
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
+
+            #render_run()
         end
+
+
     end
 
     if visuals && false
@@ -422,7 +575,7 @@ function train(use_random_init = true; visuals = false, num_steps = 288, inner_l
         run(`ffmpeg -framerate 16 -i $(dirpath * "/training_frames/a%05d.png") -c:v libx264 -crf 21 -an -pix_fmt yuv420p10le $(dirpath * "/training.mp4")`)
     end
 
-    save()
+    #save()
 end
 
 
@@ -479,7 +632,7 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
 
     #w = Window()
 
-    global results = Dict("rewards" => [], "loadleft" => [])
+    results = Dict("rewards" => [], "loadleft" => [])
 
     for k in 1:n_turbines
         results["hpc$k"] = []
@@ -567,7 +720,8 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
         println("--------------------------------------------")
     end
 
-    plot(Vector{AbstractTrace}(to_plot), layout)
+    p = plot(Vector{AbstractTrace}(to_plot), layout)
+    display(p)
 
 end
 
@@ -578,8 +732,12 @@ end
 
 
 
-function optimize_day(steps = 3000)
+function optimize_day(steps = 3000; verbose = true)
     model = Model(Ipopt.Optimizer)
+
+    if !verbose
+        set_silent(model)
+    end
 
     set_optimizer_attribute(model, "max_iter", steps)
 
@@ -595,19 +753,7 @@ function optimize_day(steps = 3000)
 end
 
 
-function smoothedReLu(x)
-    x *= 100_000
 
-    if x <= 0
-        result =  0.0
-    elseif x <= 0.5
-        result =   x^2
-    else
-        result =   x - 0.25
-    end
-
-    return result / 100_000
-end
 
 
 # sum(actions) has to be 100
@@ -622,17 +768,20 @@ function evaluate(actions; collect_rewards = false)
 
         compute_power = 0.0
         for i in 1:n_turbines
-            compute_power += actions[i,t]*0.01
+            compute_power += actions[i,t]
         end
 
         compute_power_used = compute_power
+
+        #normalizing
+        compute_power_used /= n_turbines
 
         # reward calculation
         power_for_free = 0.0
         for i in 1:n_turbines
 
             # curtailment energy onlny when wind is above 0.4
-            temp_free_power = (wind[i][step-1] - 0.4)*0.01
+            temp_free_power = (wind[i][step-1] - 0.4)
             temp_free_power = max(0.0, temp_free_power)
 
             power_for_free += temp_free_power
@@ -644,15 +793,17 @@ function evaluate(actions; collect_rewards = false)
         #power_for_free_used += 0.0000000001
 
         compute_power_used -= power_for_free
-        #compute_power_used = max(0.0, compute_power_used)
-        #compute_power_used = log( 1 + exp(500* compute_power_used) ) / 500
-        compute_power_used = smoothedReLu(compute_power_used)
+        #compute_power_used = max(0.0000001, compute_power_used)
+        compute_power_used = softplus_shifted(compute_power_used)
+        #compute_power_used = smoothedReLu(compute_power_used)
         
-        
+        #normalizing
+        compute_power_used *= (n_turbines * 0.01)
 
         reward1 = compute_power_used * grid_price[step-1]
 
-        reward = - reward1 
+        #reward = - (reward1^2)
+        reward = - reward1
 
         reward_sum += reward
 
@@ -670,4 +821,4 @@ function evaluate(actions; collect_rewards = false)
     end
 end
 
-# train(num_steps = 1047263)
+# train(num_steps = 14300, inner_loops = 2, optimized_episodes = 20, outer_loops = 100)
