@@ -13,7 +13,7 @@ using DataFrames
 using Statistics
 using JuMP
 using Ipopt
-using Mosquitto
+using ZMQ
 #using Blink
 
 n_turbines = 1
@@ -34,38 +34,17 @@ end
 
 
 
-client = Client("127.0.0.1", 1883)
+s1=Socket(REP)
+s2=Socket(REQ)
 
-# 2)
-topic = "jltest"
-subscribe(client, topic)
+bind(s1, "tcp://*:5555")
+connect(s2, "tcp://localhost:5555")
 
-# 3)
-# Send 2 messages, first one will remain in the broker an be received on new connect
-publish(client, topic, "Hi from Julia"; retain = true)
-publish(client, topic, "Another message"; retain = false)
-
-# Lets call the network loop a few times, to make sure messages are sent/received
-loop(client; timeout = 500, ntimes = 10)
-
-# 4)
-msg_channel = get_messages_channel(client)
-while !isempty(msg_channel)
-    msg = take!(msg_channel) # Tuple{String, Vector{UInt8})
-    println("Topic: $(msg.topic)\tMessage: $(String(msg.payload))")
-end
-
-tt = true
-while tt
-    loop(client; timeout = 500, ntimes = 10)
-    while !isempty(msg_channel)
-        msg = take!(msg_channel) # Tuple{String, Vector{UInt8})
-        println("Topic: $(msg.topic)\tMessage: $(String(msg.payload))")
-        tt = false
-    end
-    sleep(0.1)
-end
-println("fertig")
+send(s2, "test request")
+msg = recv(s1, String)
+send(s1, "test response")
+close(s1)
+close(s2)
 
 # action vector dim - contains the percentage of maximum power the HPC in the turbine will use for the duration of next time step
 
