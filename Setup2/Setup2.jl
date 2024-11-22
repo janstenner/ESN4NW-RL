@@ -34,16 +34,20 @@ end
 
 
 
-s1=Socket(REP)
+#s1=Socket(REP)
 s2=Socket(REQ)
 
-bind(s1, "tcp://*:5555")
+#bind(s1, "tcp://*:5555")
 connect(s2, "tcp://localhost:5555")
 
-send(s2, "test request")
-msg = recv(s1, String)
-send(s1, "test response")
-close(s1)
+for i in 1:100
+    send(s2, "test request")
+    msg = recv(s2, String)
+    println(msg)
+end
+
+#send(s1, "test response")
+#close(s1)
 close(s2)
 
 # action vector dim - contains the percentage of maximum power the HPC in the turbine will use for the duration of next time step
