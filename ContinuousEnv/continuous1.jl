@@ -221,7 +221,7 @@ function generate_job(current_time::Float64)::Job
     load = Int(max(floor(rand(Normal(160,50))),0.0))                 # Compute load in units (integer)
     window = rand(0.3:3.0)           # The allowed time window
     deadline = current_time + window
-    penalty = max(rand(Normal(10,4)),0.0)+0.5         # Penalty that can become negative oder positive reward
+    penalty = max(rand(Normal(6,4)),0.0)+0.5         # Penalty that can become negative oder positive reward
     return Job(new_id, load, load, current_time, deadline, penalty)
 end
 
@@ -272,8 +272,8 @@ y0 = Float32.(y0)
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 20.0
-nna_scale_critic = 11.0
+nna_scale = 30.0
+nna_scale_critic = 15.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -299,9 +299,9 @@ logσ_is_network = false
 max_σ = 10000.0f0
 entropy_loss_weight = 0.01
 clip_grad = 0.3
-target_kl = 0.1
+target_kl = 1.0
 clip1 = false
-start_logσ = 1.0
+start_logσ = -0.5
 tanh_end = false
 clip_range = 0.2f0
 
@@ -570,7 +570,12 @@ function initialize_setup(;use_random_init = false)
 end
 
 function generate_random_init()
-    global wind, grid_price, curtailment_threshold
+    global wind, grid_price, curtailment_threshold, job_slots, allocation
+
+
+    job_slots = [nothing for i in 1:n_jobs]
+    allocation = zeros(Int, n_turbines, n_jobs)
+
 
     # Here the model variables can be modified before the generators are called
     
@@ -616,7 +621,7 @@ end
 initialize_setup()
 
 train_rewards = Float64[]
-temp_reward_queue = CircularArrayBuffer{Float64}(smoothing_window)
+temp_reward_queue::CircularArrayBuffer{Float64}
 
 
 function train(use_random_init = true; num_steps = 500_000, smoothing_window = 400, collect_every = 100, plot_every = 5000)
@@ -624,6 +629,8 @@ function train(use_random_init = true; num_steps = 500_000, smoothing_window = 4
 
     global train_rewards
     global temp_reward_queue
+
+    temp_reward_queue = CircularArrayBuffer{Float64}(smoothing_window)
 
 
     if use_random_init
@@ -723,7 +730,7 @@ end
 
 
 
-function render_run(use_best = false; plot_optimal = false, steps = 6000)
+function render_run(steps = 864)
     # if use_best
     #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
     # end
@@ -737,16 +744,24 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
     # temp_update_after = agent.policy.update_after
     # agent.policy.update_after = 100000
 
-    agent.policy.update_step = 0
+    temp_logσ = agent.policy.approximator.actor.logσ
+    agent.policy.approximator.actor.logσ[:,:] = -7 .* ones(4,1)
+
     global rewards = Float64[]
     reward_sum = 0.0
 
     #w = Window()
 
-    results = Dict("rewards" => [], "loadleft" => [])
+    global results = Dict("rewards" => [], "grid_price" => [])
 
     for k in 1:n_turbines
-        results["hpc$k"] = []
+        results["wind$(k)"] = []
+    end
+
+    for k in 1:n_jobs
+        results["job$(k)_remaining"] = []
+        results["job$(k)_penalty"] = []
+        results["job$(k)_time_left"] = []
     end
 
     global currentDF = DataFrame()
@@ -754,7 +769,7 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
     reset!(env)
     generate_random_init()
 
-    while !env.done
+    for i in 1:steps
         action = agent(env)
 
         #action = env.y[6] < 0.27 ? [-1.0] : [1.0]
@@ -762,23 +777,24 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
         env(action)
 
         for k in 1:n_turbines
-            push!(results["hpc$k"], env.p[k])
+            push!(results["wind$(k)"], env.y[3+k*3])
         end
+
+        for k in 1:n_jobs
+            push!(results["job$(k)_remaining"], env.y[4 + n_turbines * 3 + 1 + (k-1) * 3])
+            push!(results["job$(k)_time_left"], env.y[4 + n_turbines * 3 + 2 + (k-1) * 3])
+            push!(results["job$(k)_penalty"], env.y[4 + n_turbines * 3 + 3 + (k-1) * 3])
+        end
+
         push!(results["rewards"], env.reward[1])
-        push!(results["loadleft"], env.y[1])
+        push!(results["grid_price"], env.y[3])
 
         # println(mean(env.reward))
 
         reward_sum += mean(env.reward)
         # push!(rewards, mean(env.reward))
 
-        tmp = DataFrame()
-        insertcols!(tmp, :timestep => env.steps)
-        insertcols!(tmp, :action => [vec(env.action)])
-        insertcols!(tmp, :p => [send_to_host(env.p)])
-        insertcols!(tmp, :y => [send_to_host(env.y)])
-        insertcols!(tmp, :reward => [reward(env)])
-        append!(hook.currentDF, tmp)
+
     end
 
     # if use_best
@@ -805,46 +821,26 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
 
     
 
-    to_plot = [scatter(y=results["rewards"], name="reward", yaxis = "y2"),
-                scatter(y=results["loadleft"], name="load left"),
-                scatter(y=grid_price, name="grid price")]
+    p = make_subplots(rows=3+n_jobs, cols=1)
+
+    # global to_plot = [scatter(y=results["rewards"], name="reward", yaxis = "y2"),
+    #             scatter(y=results["grid_price"], name="grid price")]
+
+    #add_trace!(p, scatter(y=results["rewards"], name="reward", yaxis = "y2"), row = 3)
+    add_trace!(p, scatter(y=results["grid_price"], name="grid price"), row = 3, col = 1)
 
     for k in 1:n_turbines
-        push!(to_plot, scatter(y=results["hpc$k"], name="hpc$k"))
-        push!(to_plot, scatter(y=wind[k], name="wind$k"))
+        #push!(to_plot, scatter(y=results["wind$(k)"], name="wind$(k)"))
+        add_trace!(p, scatter(y=results["wind$(k)"], name="wind$(k)"), row = 3, col = 1)
+    end
+    
+    for k in 1:n_jobs
+        add_trace!(p, scatter(y=results["job$(k)_remaining"], name="job$(k) remaining"), row = 3+k, col = 1)
     end
 
-    if plot_optimal
-        optimal_actions = optimize_day(steps)
-        optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
 
-        for k in 1:n_turbines
-            push!(to_plot, scatter(y=optimal_actions[k,:], name="optimal_hpc$k"))
-        end
-        push!(to_plot, scatter(y=optimal_rewards, name="optimal_reward", yaxis = "y2"))
-
-
-        println("")
-        println("--------------------------------------------")
-        println("AGENT:   $reward_sum")
-        println("IPOPT:   $(sum(optimal_rewards))")
-        println("--------------------------------------------")
-    end
-
-    p = plot(Vector{AbstractTrace}(to_plot), layout)
+    relayout!(p, layout.fields)
     display(p)
 
 end
 
-
-# train(num_steps = 14300, inner_loops = 2, outer_loops = 10)
-
-function plot_rewards(smoothing = 30)
-    to_plot = Float64[]
-    for i in smoothing:length(hook.rewards)
-        push!(to_plot, mean(hook.rewards[i+1-smoothing:i]))
-    end
-
-    p = plot(to_plot)
-    display(p)
-end
