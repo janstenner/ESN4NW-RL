@@ -565,7 +565,8 @@ function initialize_setup(;use_random_init = false)
                             generate_random_init = generate_random_init,
                             collect_history = false,
                             collect_rewards_all_timesteps = false,
-                            early_success_possible = true)
+                            early_success_possible = true,
+                            collect_bestDF = false)
 end
 
 function generate_random_init()
