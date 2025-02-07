@@ -52,10 +52,12 @@ action_dim = n_turbines * n_jobs
 
 
 # wind model variables
+wind_model_vars = rand(n_turbines, 5) # 5 variables between 0 and 1 per turbine
 wind = Float64[]
 
 
 # grid price model variables
+grid_model_vars = [rand() for i in 1:5] # 5 variables between 0 and 1
 grid_price = 0.0
 
 
@@ -115,13 +117,79 @@ sim_space = Space(fill(0..1, (state_dim)))
 
 # Generate a wind signal for each turbine. For now, we simply return random values in [0,1]
 function generate_wind()
-    return [rand() for i in 1:n_turbines]
+    global wind_model_vars
+    temp_wind = Float64[]
+
+    for i in 1:n_turbines
+        # Frequency (cycles per day) for the wind fluctuations.
+        frequency = 1.5
+
+        # Base wind signal: a sine wave that oscillates between 0 and 1.
+        # The phase offset ensures that different turbines can have different fluctuation patterns.
+        base_wind = 0.5 + 0.5 * sin(2π * frequency * env.time + wind_phase[i])
+        
+        # Update the momentum term with a decay factor (0.8) and add a little random noise.
+        wind_momentum[i] = 0.8 * wind_momentum[i] + 0.2 * (rand() - 0.5)
+        
+        # The momentum adds extra variation to the base wind signal.
+        wind_val = base_wind + 0.1 * wind_momentum[i]
+        
+        # Clamp the resulting wind value to [0, 1].
+        push!(temp_wind, clamp(wind_val, 0.0, 1.0))
+    end
+    
+    return temp_wind
 end
+
+#test plot
+# test_wind = Float64[]
+# for step in 1:14_400 # 10 days
+#     push!(test_wind, generate_wind()[1])
+#     env.time += dt
+# end
+# plot(test_wind)
 
 # Generate a grid price signal in [0,1]
 function generate_grid_price()
-    return rand()
+    global grid_model_vars
+    # t_day is the current time of day, in [0, 1). For example, env.time=0.25 represents 6:00 AM if 1.0 = 24 hours.
+    t_day = mod(env.time, 1.0)
+    
+    # Base grid price: using a cosine so that:
+    # - At midnight (t_day = 0), cos(0)=1 and the price is 1.
+    # - At noon (t_day = 0.5), cos(π)=-1 and the price is 0.
+    base_price = 0.5 + 0.5 * cos(2π * t_day)
+
+    # Scale the grid price according to the first two model vars
+    scaled_base_price = (grid_model_vars[1] - 0.5) * 0.5 + ((grid_model_vars[2]*0.5) + 0.8) * base_price
+
+    # Add two small additional sines based on the second two model vars
+    scaled_base_price += (grid_model_vars[3] * 0.3) * sin(9.3 * env.time)
+    scaled_base_price += (grid_model_vars[4] * 0.2) * sin(14.3 * env.time)
+
+    # Add the additive grid momentum which is the last model var
+    price_val = scaled_base_price + 0.25 * (grid_model_vars[5] - 0.5)
+    
+    # Update grid model wvars in a momentum fashion where the change is determined by sines
+    for i in eachindex(grid_model_vars)
+        grid_model_vars[i] = clamp(0.8 * grid_model_vars[i] + 0.2 * sin(i*env.time), 0.0, 1.0)
+    end
+
+    # scale down price_val
+    price_val = 0.5 + (price_val-0.3)*0.7
+    
+    # Clamp the grid price to [0, 1].
+    return clamp(price_val, 0.0, 1.0)
 end
+
+#test plot
+test_price = Float64[]
+for step in 1:(1440/5)*1
+    push!(test_price, generate_grid_price()[1])
+    env.time += dt
+end
+plot(test_price, Layout(yaxis_range=[0, 1]))
+
 
 # Generate a curtailment threshold signal
 function generate_curtailment_threshold()
