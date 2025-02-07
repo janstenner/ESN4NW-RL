@@ -85,12 +85,13 @@ allocation::Matrix{Int} = zeros(Int, n_turbines, n_jobs)
 
 
 # state vector
+# - time of day
 # - current gradient and price of energy from the grid
 # - current curtailment_threshold
 # - wind stituation at every turbine (gradient of power output, current power output and curtailment enegry)
 # - for each job slot: remaining, time until deadline, and penalty
 # - the flattened allocation matrix of the size n_turbines * n_jobs
-state_dim = 3 + 3*n_turbines + 3*n_jobs + n_turbines * n_jobs
+state_dim = 4 + 3*n_turbines + 3*n_jobs + n_turbines * n_jobs
 
 
 
@@ -152,12 +153,12 @@ function generate_wind()
 end
 
 #test plot
-test_wind = Float64[]
-for step in 1:(1440/5)*1
-    push!(test_wind, generate_wind()[1])
-    env.time += dt
-end
-plot(test_wind, Layout(yaxis_range=[0, 1]))
+# test_wind = Float64[]
+# for step in 1:(1440/5)*1
+#     push!(test_wind, generate_wind()[1])
+#     env.time += dt
+# end
+# plot(test_wind, Layout(yaxis_range=[0, 1]))
 
 
 
@@ -217,10 +218,10 @@ function generate_job(current_time::Float64)::Job
 
     id_counter += 1
 
-    load = Int(max(floor(rand(Normal(70,30))),0.0))                 # Compute load in units (integer)
-    window = rand(10.0:50.0)           # The allowed time window (in the same time units as dt)
+    load = Int(max(floor(rand(Normal(160,50))),0.0))                 # Compute load in units (integer)
+    window = rand(0.3:3.0)           # The allowed time window
     deadline = current_time + window
-    penalty = max(rand(Normal(8,4)),0.0)+0.5         # Penalty that can become negative oder positive reward
+    penalty = max(rand(Normal(10,4)),0.0)+0.5         # Penalty that can become negative oder positive reward
     return Job(new_id, load, load, current_time, deadline, penalty)
 end
 
@@ -231,7 +232,7 @@ end
 
 # y0 calculation
 
-y0 = Float64[]
+y0 = [0.0]
 
 wind = generate_wind()
 
@@ -454,7 +455,7 @@ function do_step(env)
 
 
     # Build and return the new state.
-    y = Float64[]
+    y = [mod(env.time, 1.0)]
     
     push!(y, grid_price - env.y[2])
     push!(y, grid_price)
@@ -572,7 +573,7 @@ function generate_random_init()
 
     # Here the model variables can be modified before the generators are called
     
-    y0 = Float64[]
+    y0 = [0.0]
 
     wind = generate_wind()
 
@@ -613,12 +614,15 @@ end
 
 initialize_setup()
 
+train_rewards = Float64[]
+temp_reward_queue = CircularArrayBuffer{Float64}(smoothing_window)
+
 
 function train(use_random_init = true; num_steps = 500_000, smoothing_window = 400, collect_every = 100, plot_every = 5000)
     frame = 1
 
-    global train_rewards = Float64[]
-    global temp_reward_queue = CircularArrayBuffer{Float64}(smoothing_window)
+    global train_rewards
+    global temp_reward_queue
 
 
     if use_random_init
