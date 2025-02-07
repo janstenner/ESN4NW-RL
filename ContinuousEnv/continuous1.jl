@@ -121,18 +121,28 @@ function generate_wind()
     temp_wind = Float64[]
 
     for i in 1:n_turbines
-        # Frequency (cycles per day) for the wind fluctuations.
-        frequency = 1.5
 
-        # Base wind signal: a sine wave that oscillates between 0 and 1.
-        # The phase offset ensures that different turbines can have different fluctuation patterns.
-        base_wind = 0.5 + 0.5 * sin(2π * frequency * env.time + wind_phase[i])
+        t_mod = mod(env.time, 2π)
+
+        # Base wind
+        base_wind = 0.5 + 0.5 * sin(t_mod + wind_model_vars[i,1] * 4π)
+
+        # Add three additional sines based on the model vars 2,3 and 4
+        base_wind += (wind_model_vars[i,2] * 0.3) * sin(4.5 * env.time + 1.0)
+        base_wind += (wind_model_vars[i,3] * 0.2) * sin(6.2 * env.time + 1.2)
+        base_wind += (wind_model_vars[i,4] * 0.2) * sin(8.3 * env.time + 1.7)
+
+        # Add the additive grid momentum which is the last model var
+        wind_val = base_wind + 0.8 * (wind_model_vars[5] - 0.3)
+
+        # scale down wind_val
+        wind_val = 0.5 + (wind_val-0.3)*0.7
         
-        # Update the momentum term with a decay factor (0.8) and add a little random noise.
-        wind_momentum[i] = 0.8 * wind_momentum[i] + 0.2 * (rand() - 0.5)
+        # Update wind model wvars in a momentum fashion where the change is determined by sines
+        for j in eachindex(wind_model_vars[i,:])
+            wind_model_vars[i,j] = clamp(0.8 * wind_model_vars[i,j] + 0.2 * sin(j*env.time), 0.0, 1.0)
+        end
         
-        # The momentum adds extra variation to the base wind signal.
-        wind_val = base_wind + 0.1 * wind_momentum[i]
         
         # Clamp the resulting wind value to [0, 1].
         push!(temp_wind, clamp(wind_val, 0.0, 1.0))
@@ -142,12 +152,15 @@ function generate_wind()
 end
 
 #test plot
-# test_wind = Float64[]
-# for step in 1:14_400 # 10 days
-#     push!(test_wind, generate_wind()[1])
-#     env.time += dt
-# end
-# plot(test_wind)
+test_wind = Float64[]
+for step in 1:(1440/5)*1
+    push!(test_wind, generate_wind()[1])
+    env.time += dt
+end
+plot(test_wind, Layout(yaxis_range=[0, 1]))
+
+
+
 
 # Generate a grid price signal in [0,1]
 function generate_grid_price()
