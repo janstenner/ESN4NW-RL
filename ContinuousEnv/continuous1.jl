@@ -1,12 +1,71 @@
+using LinearAlgebra
+using IntervalSets
+using StableRNGs
+using SparseArrays
+using Conda
+using FFTW
+using PlotlyJS
+using FileIO, JLD2
+using Flux
 using Random
+using RL
+using DataFrames
+using Statistics
+using JuMP
+using Ipopt
+using Distributions
+using UnicodePlots
+using CircularArrayBuffers
+#using Blink
 
-##############################
-# Data Structures Definition #
-##############################
+n_turbines = 1
+
+
+scriptname = "continuous1"
+
+
+
+
+#dir variable
+dirpath = string(@__DIR__)
+open(dirpath * "/.gitignore", "w") do io
+    println(io, "training_frames/*")
+    #println(io, "saves/*")
+end
+
+
+
+# Global constant for the probability to spawn a new job in an empty slot.
+JOB_SPAWN_PROB = 0.02
+
+
+# Number of job slots available (e.g. 4)
+n_jobs = 4
+
+
+# Maximum compute slots per data center (e.g. 5)
+max_slots = 5
+
+
+# action vector dim - contains a flattened delta_allocation matrix od size n_turbines * n_jobs
+action_dim = n_turbines * n_jobs
+
+
+# wind model variables
+wind = Float64[]
+
+
+# grid price model variables
+grid_price = 0.0
+
+
+# Curtailment threshold model variables
+curtailment_threshold = 0.4
+
 
 # A job has an integer compute load, a deadline, and an associated penalty.
-struct Job
-    id::Int               # A unique identifier (could be generated randomly)
+mutable struct Job
+    id::Int               # A unique identifier
     load::Int             # Total compute units required
     remaining::Int        # Work still to be done
     arrival_time::Float64 # When the job becomes available
@@ -14,32 +73,48 @@ struct Job
     penalty::Float64      # If finished in time, add this as positive reward; if not, subtract it
 end
 
-# The continuous environment structure
-mutable struct ContinuousEnv
-    time::Float64               # Current simulation time
-    dt::Float64                 # Time step
-    n_turbines::Int             # Number of data centers (wind turbines)
-    n_jobs::Int                 # Number of job slots available (e.g. 4)
-    max_slots::Int              # Maximum compute slots per data center (e.g. 5)
-    threshold::Float64          # Wind threshold for free (green) energy (e.g. 0.4)
-    
-    wind::Vector{Float64}       # Current wind signal per turbine (length n_turbines)
-    grid_price::Float64         # Current grid price (assumed global here)
-    
-    # Job slots: each slot may or may not hold a job
-    job_slots::Vector{Union{Job, Nothing}}  # length = n_jobs
-    
-    # Allocation matrix (n_turbines × n_jobs): allocation[i, j] gives the number
-    # of compute slots in data center i that are allocated to job j.
-    allocation::Matrix{Int}
-end
+# Job slots: each slot may or may not hold a job
+job_slots::Vector{Union{Job, Nothing}} = [nothing for i in 1:n_jobs]
 
-#############################################
-# Helper functions: Random signal generators#
-#############################################
+
+# Allocation matrix (n_turbines × n_jobs): allocation[i, j] gives the number
+# of compute slots in data center i that are allocated to job j.
+allocation::Matrix{Int} = zeros(Int, n_turbines, n_jobs)
+
+
+# state vector
+# - current gradient and price of energy from the grid
+# - current curtailment_threshold
+# - wind stituation at every turbine (gradient of power output, current power output and curtailment enegry)
+# - for each job slot: remaining, time until deadline, and penalty
+# - the flattened allocation matrix of the size n_turbines * n_jobs
+state_dim = 3 + 3*n_turbines + 3*n_jobs + n_turbines * n_jobs
+
+
+
+# env parameters
+
+seed = Int(floor(rand()*100000))
+# seed = 800
+
+gpu_env = false
+
+te = Inf
+dt = 5/1440 # 5-minute steps as fraction of a day
+t0 = 0.0
+min_best_episode = 1
+
+sim_space = Space(fill(0..1, (state_dim)))
+
+
+
+
+######################################
+# Helper functions: Signal generators#
+######################################
 
 # Generate a wind signal for each turbine. For now, we simply return random values in [0,1]
-function generate_wind(n_turbines::Int)
+function generate_wind()
     return [rand() for i in 1:n_turbines]
 end
 
@@ -48,212 +123,642 @@ function generate_grid_price()
     return rand()
 end
 
+# Generate a curtailment threshold signal
+function generate_curtailment_threshold()
+    return 0.4
+end
+
 # Generate a new job given the current time.
-# You can adjust the ranges as desired.
+id_counter = 1
 function generate_job(current_time::Float64)::Job
-    new_id = rand(1:10^6)            # For example, a random unique id
-    load = rand(1:5)                 # Compute load in units (integer)
+    global id_counter
+    new_id = id_counter
+
+    id_counter += 1
+
+    load = Int(max(floor(rand(Normal(70,30))),0.0))                 # Compute load in units (integer)
     window = rand(10.0:50.0)           # The allowed time window (in the same time units as dt)
     deadline = current_time + window
-    penalty = load * 2.0             # For example: penalty equals two times the load
+    penalty = max(rand(Normal(8,4)),0.0)+0.5         # Penalty that can become negative oder positive reward
     return Job(new_id, load, load, current_time, deadline, penalty)
 end
 
-#############################################
-# Environment Initialization and State      #
-#############################################
 
-# Create and return a new continuous environment.
-function reset_env(; dt=5.0, n_turbines=1, n_jobs=4, max_slots=5, threshold=0.4)
-    env = ContinuousEnv(
-        0.0,                   # time starts at zero
-        dt,
-        n_turbines,
-        n_jobs,
-        max_slots,
-        threshold,
-        generate_wind(n_turbines),  # initial wind for each turbine
-        generate_grid_price(),      # initial grid price
-        [nothing for i in 1:n_jobs], # no job scheduled initially
-        zeros(Int, n_turbines, n_jobs)  # no compute slots allocated yet
-    )
-    return env
+
+
+
+
+# y0 calculation
+
+y0 = Float64[]
+
+wind = generate_wind()
+
+grid_price = generate_grid_price()
+
+curtailment_threshold = generate_curtailment_threshold()
+
+
+push!(y0, grid_price - grid_price) # start with derivative 0
+push!(y0, grid_price)
+
+push!(y0, curtailment_threshold)
+
+for i in 1:n_turbines
+    push!(y0, wind[i] - wind[i]) # start with derivative 0
+    push!(y0, wind[i])
+    push!(y0, max(0.0, wind[i] - curtailment_threshold))
 end
 
-# Build the state vector (here as a flat vector of Float32).
-function get_state(env::ContinuousEnv)
-    state = Float32[]
-    
-    # Include (possibly normalized) time:
-    push!(state, Float32(env.time))
-    
-    # Add wind readings (per turbine):
-    for w in env.wind
-        push!(state, Float32(w))
-    end
-    
-    # Add grid price:
-    push!(state, Float32(env.grid_price))
-    
-    # For each job slot, add job information:
-    # Here we include: remaining, time until deadline, and penalty.
-    for job in env.job_slots
-        if job !== nothing
-            push!(state, Float32(job.remaining))
-            push!(state, Float32(max(0.0, job.deadline - env.time)))  # time left (could be normalized)
-            push!(state, Float32(job.penalty))
-        else
-            # Use zero values if no job is scheduled in this slot.
-            push!(state, 0.0f0)
-            push!(state, 0.0f0)
-            push!(state, 0.0f0)
-        end
-    end
-    
-    # Flatten the allocation matrix into the state.
-    for i in 1:size(env.allocation, 1)
-        for j in 1:size(env.allocation, 2)
-            push!(state, Float32(env.allocation[i, j]))
-        end
-    end
-    
-    return state
+for i in 1:n_jobs
+    push!(y0, 0.0f0)
+    push!(y0, 0.0f0)
+    push!(y0, 0.0f0)
 end
 
-#################################################
-# The Step Function – Core Environment Update   #
-#################################################
+for i in 1:n_jobs*n_turbines
+    push!(y0, 0.0f0)
+end
 
-# Global constant for the probability to spawn a new job in an empty slot.
-const JOB_SPAWN_PROB = 0.1
+y0 = Float32.(y0)
 
-"""
-    step!(env, action)
 
-Takes an action (a matrix of integers of shape (n_turbines, n_jobs)) which represents the delta
-(change) in compute slot allocation for each data center and job slot. Updates the environment:
-  - Adjusts allocations (enforcing that each data center uses at most max_slots)
-  - Uses the allocated compute slots to advance any assigned jobs by one unit per slot.
-  - Computes the cost based on grid power consumption after free energy is used.
-  - Updates job statuses (rewarding completion or penalizing missed deadlines).
-  - Advances time and updates the wind and grid price signals.
-Returns the new state vector and the reward for the step.
-"""
-function step!(env::ContinuousEnv, action::Matrix{Int})
+
+
+
+
+
+# agent tuning parameters
+memory_size = 0
+nna_scale = 20.0
+nna_scale_critic = 11.0
+drop_middle_layer = false
+drop_middle_layer_critic = false
+fun = gelu
+use_gpu = false
+actionspace = Space(fill(-1..1, (action_dim)))
+
+# additional agent parameters
+rng = StableRNG(seed)
+Random.seed!(seed)
+y = 0.997f0
+p = 0.95f0
+
+start_steps = -1
+start_policy = ZeroPolicy(actionspace)
+
+update_freq = 100
+
+
+learning_rate = 1e-5
+n_epochs = 3
+n_microbatches = 10
+logσ_is_network = false
+max_σ = 10000.0f0
+entropy_loss_weight = 0.01
+clip_grad = 0.3
+target_kl = 0.1
+clip1 = false
+start_logσ = 1.0
+tanh_end = false
+clip_range = 0.2f0
+
+
+
+wind_only = false
+
+
+
+
+function softplus_shifted(x)
+    factor = 700
+    log( 1 + exp(factor * (x - 0.006)) ) / factor
+end
+
+
+function do_step(env)
+    global wind, grid_price, curtailment_threshold, job_slots, allocation, n_turbines, n_jobs
+
+
     # -- 1. Update the allocation based on the agent's action --
-    # The action is assumed to be a delta (positive or negative) for each [i,j].
-    @assert size(action) == size(env.allocation)
-    for i in 1:env.n_turbines
-        # First, update the allocation by adding the delta and clamp each element to ≥ 0.
-        for j in 1:env.n_jobs
-            #TODO only if the job is not nothing
-            env.allocation[i, j] = max(env.allocation[i, j] + action[i, j], 0)
-        end
-        # Then enforce the maximum slots constraint for data center i.
-        total_alloc = sum(env.allocation[i, :])
-        if total_alloc > env.max_slots
-            # For simplicity, we scale down proportionally (and then round):
-            scale = env.max_slots / total_alloc
-            for j in 1:env.n_jobs
-                env.allocation[i, j] = round(Int, env.allocation[i, j] * scale)
-                #TODO make sure the sum fits
+    # For each data center (turbine) and job slot:
+    action = env.p
+
+    for i in 1:n_turbines
+        for j in 1:n_jobs
+            # Only update allocation if there is an active job in this slot.
+            if job_slots[j] !== nothing
+                allocation[i, j] = max(allocation[i, j] + action[i, j], 0)
+            else
+                # If there is no job, make sure allocation remains 0.
+                allocation[i, j] = 0
             end
-            # (An alternative is to simply clip extra slots in a fixed order.)
+        end
+
+        # Enforce the maximum compute slots constraint.
+        total_alloc = sum(allocation[i, :])
+        if total_alloc > max_slots
+            # Scale down each allocation proportionally.
+            scale = max_slots / total_alloc
+            scaled_alloc = [allocation[i, j] * scale for j in 1:n_jobs]
+            
+            # Use rounding to get integer allocations.
+            new_alloc = [round(Int, x) for x in scaled_alloc]
+            
+            # After rounding, we may end up with a total allocation that is too high or too low.
+            # First, if the sum is too high, iteratively reduce the allocation from the job slot with the highest value.
+            while sum(new_alloc) > max_slots
+                idx = argmax(new_alloc)  # index of the largest allocation
+                new_alloc[idx] -= 1
+            end
+            # Conversely, if the sum is less than max_slots, add extra slots to the job slot with the smallest allocation.
+            while sum(new_alloc) < max_slots
+                idx = argmin(new_alloc)
+                new_alloc[idx] += 1
+            end
+            
+            # Finally, update the allocation for data center i.
+            for j in 1:n_jobs
+                allocation[i, j] = new_alloc[j]
+            end
         end
     end
+
+
+
 
     # -- 2. Process compute slots and update job progress & cost --
     total_cost = 0.0
-    job_reward = 0.0   # bonus rewards from completed jobs or penalties for missed deadlines
-    for i in 1:env.n_turbines
-        # Compute total slots allocated to jobs in data center i.
-        allocated = sum(env.allocation[i, :])
-        # If no job is scheduled, assume one “idle” slot is active and consumes power.
+    job_reward = 0.0  # bonus rewards from completed jobs or penalties for missed deadlines
+    for i in 1:n_turbines
+        # Sum the allocated slots for this turbine.
+        allocated = sum(allocation[i, :])
+        
+        # If no job is allocated, assume one idle slot is used.
         if allocated == 0
             allocated = 1  # idle consumption (without any job progress)
         end
 
-        #TODO allocated to percentage
+        # Convert allocated slots into a proportion of max_slots.
+        # For example, if allocated=4 and max_slots=5, effective_alloc becomes 0.8.
+        effective_alloc = allocated / max_slots
 
-        # Determine free energy available (using the wind signal for this turbine).
-        # (This is a simple rule – you might adjust how wind covers compute demand.)
-        free_energy = max(0.0, env.wind[i] - env.threshold)
-        # The remainder of the allocated slots are provided by grid energy.
-        grid_energy = max(0, allocated - free_energy)
-        # The cost is then:
-        cost = grid_energy * env.grid_price
+        # Determine free (wind) energy available (for simplicity, using a threshold rule).
+        free_energy = max(0.0, wind[i] - curtailment_threshold)
+        
+        # Calculate the grid energy needed as the shortfall (if any).
+        grid_energy = max(0.0, effective_alloc - free_energy)
+        cost = grid_energy * grid_price
         total_cost += cost
 
-        # For each job slot in this data center, update the job progress.
-        for j in 1:env.n_jobs
-            slots_for_job = env.allocation[i, j]
-            if slots_for_job > 0 && (env.job_slots[j] !== nothing)
-                # Each slot produces one unit of compute work.
-                job = env.job_slots[j]
+        # For each job slot in this turbine, update the job's progress.
+        for j in 1:n_jobs
+            slots_for_job = allocation[i, j]
+            if slots_for_job > 0 && (job_slots[j] !== nothing)
+                job = job_slots[j]
+                # Each compute slot reduces the remaining load by one unit.
                 job.remaining -= slots_for_job
-                # Check for job completion.
                 if job.remaining <= 0
-                    # Reward: add the job's penalty value as bonus reward.
+                    # If a job finishes, add its penalty as a positive reward bonus.
                     job_reward += job.penalty
-                    # Remove the job and clear its allocation in *all* data centers.
-                    env.job_slots[j] = nothing
-                    for k in 1:env.n_turbines
-                        env.allocation[k, j] = 0
+                    # Remove the job and clear its allocation from all data centers.
+                    job_slots[j] = nothing
+                    for k in 1:n_turbines
+                        allocation[k, j] = 0
                     end
                 end
             end
         end
     end
 
-    # -- 3. Update time and new external signals --
-    env.time += env.dt
-    env.wind = generate_wind(env.n_turbines)
-    env.grid_price = generate_grid_price()
 
-    # -- 4. Check deadlines and apply penalties to overdue jobs --
-    for j in 1:env.n_jobs
-        if env.job_slots[j] !== nothing
-            job = env.job_slots[j]
+
+
+
+    # -- 3. Update time and external signals --
+    wind = generate_wind()
+    grid_price = generate_grid_price()
+    curtailment_threshold = generate_curtailment_threshold()
+
+
+
+
+
+    # Check deadlines for jobs and apply penalties if necessary.
+    for j in 1:n_jobs
+        if job_slots[j] !== nothing
+            job = job_slots[j]
             if env.time > job.deadline && job.remaining > 0
-                # Job missed its deadline: incur a penalty.
                 job_reward -= job.penalty
-                # Remove the job and clear its allocation.
-                env.job_slots[j] = nothing
-                for i in 1:env.n_turbines
-                    env.allocation[i, j] = 0
+                job_slots[j] = nothing
+                for i in 1:n_turbines
+                    allocation[i, j] = 0
                 end
             end
         end
     end
 
-    # -- 5. Possibly generate new jobs in empty job slots --
-    for j in 1:env.n_jobs
-        if env.job_slots[j] === nothing && rand() < JOB_SPAWN_PROB
-            env.job_slots[j] = generate_job(env.time)
+    # Possibly generate new jobs in empty job slots.
+    for j in 1:n_jobs
+        if job_slots[j] === nothing && rand() < JOB_SPAWN_PROB
+            job_slots[j] = generate_job(env.time)
         end
     end
 
-    # -- 6. Calculate the step reward --
-    # (A simple formulation: reward is the negative cost plus any job bonuses/penalties.)
+    # Total reward is the negative cost plus any job-based rewards.
     step_reward = -total_cost + job_reward
+    env. reward = [step_reward]
+
+
+
 
     # Build and return the new state.
-    new_state = get_state(env)
-    return new_state, step_reward
+    y = Float64[]
+    
+    push!(y, grid_price - env.y[2])
+    push!(y, grid_price)
+
+    push!(y, curtailment_threshold)
+
+    for i in 1:n_turbines
+        push!(y, wind[i] - env.y[3*i+1]) # start with derivative 0
+        push!(y, wind[i])
+        push!(y, max(0.0, wind[i] - curtailment_threshold))
+    end
+
+    for job in job_slots
+        if job !== nothing
+            push!(y, Float32(job.remaining))
+            push!(y, Float32(max(0.0, job.deadline - env.time)))  # time left (could be normalized)
+            push!(y, Float32(job.penalty))
+        else
+            # Use zero values if no job is scheduled in this slot.
+            push!(y, 0.0f0)
+            push!(y, 0.0f0)
+            push!(y, 0.0f0)
+        end
+    end
+
+    # Flatten the allocation matrix into the state.
+    for i in 1:size(allocation, 1)
+        for j in 1:size(allocation, 2)
+            push!(y, Float32(allocation[i, j]))
+        end
+    end
+
+    return Float32.(y)
 end
 
-#############################################
-# Example Usage                             #
-#############################################
+function reward_function(env)
+    return env.reward
+end
 
-# Create an environment instance.
-env = reset_env(dt=5.0, n_turbines=1, n_jobs=4, max_slots=5, threshold=0.4)
 
-# (For example, an agent might output a delta matrix for compute slot reallocation.)
-# Here we just create a dummy action (no changes).
-dummy_action = zeros(Int, env.n_turbines, env.n_jobs)
 
-# Run one step.
-state, reward = step!(env, dummy_action)
-println("New state: ", state)
-println("Reward: ", reward)
+function featurize(y0 = nothing, t0 = nothing; env = nothing)
+    if isnothing(env)
+        y = y0
+    else
+        y = env.y
+    end
+
+    return reshape(y, length(y), 1)
+end
+
+function prepare_action(action0 = nothing, t0 = nothing; env = nothing) 
+    if isnothing(env)
+        action =  action0
+    else
+        action = env.action
+    end
+
+    # convert Float32 array action to Int delta_allocation matrix
+    action = Int.(round.(reshape(action, n_turbines, n_jobs)))
+
+    return action
+end
+
+
+
+function initialize_setup(;use_random_init = false)
+
+    global env = GeneralEnv(do_step = do_step, 
+                reward_function = reward_function,
+                featurize = featurize,
+                prepare_action = prepare_action,
+                y0 = y0,
+                te = te, t0 = t0, dt = dt, 
+                sim_space = sim_space, 
+                action_space = actionspace,
+                max_value = 1.0,
+                check_max_value = "nothing")
+
+        global agent = create_agent_ppo(action_space = actionspace,
+                state_space = env.state_space,
+                use_gpu = use_gpu, 
+                rng = rng,
+                y = y, p = p,
+                update_freq = update_freq,
+                learning_rate = learning_rate,
+                nna_scale = nna_scale,
+                nna_scale_critic = nna_scale_critic,
+                drop_middle_layer = drop_middle_layer,
+                drop_middle_layer_critic = drop_middle_layer_critic,
+                fun = fun,
+                clip1 = clip1,
+                n_epochs = n_epochs,
+                n_microbatches = n_microbatches,
+                logσ_is_network = logσ_is_network,
+                max_σ = max_σ,
+                entropy_loss_weight = entropy_loss_weight,
+                clip_grad = clip_grad,
+                target_kl = target_kl,
+                start_logσ = start_logσ,
+                tanh_end = tanh_end,
+                clip_range = clip_range)
+
+
+    global hook = GeneralHook(min_best_episode = min_best_episode,
+                            collect_NNA = false,
+                            generate_random_init = generate_random_init,
+                            collect_history = false,
+                            collect_rewards_all_timesteps = false,
+                            early_success_possible = true)
+end
+
+function generate_random_init()
+    global wind, grid_price, curtailment_threshold
+
+    # Here the model variables can be modified before the generators are called
+    
+    y0 = Float64[]
+
+    wind = generate_wind()
+
+    grid_price = generate_grid_price()
+
+    curtailment_threshold = generate_curtailment_threshold()
+
+
+    push!(y0, grid_price - grid_price) # start with derivative 0
+    push!(y0, grid_price)
+
+    push!(y0, curtailment_threshold)
+
+    for i in 1:n_turbines
+        push!(y0, wind[i] - wind[i]) # start with derivative 0
+        push!(y0, wind[i])
+        push!(y0, max(0.0, wind[i] - curtailment_threshold))
+    end
+
+    for i in 1:n_jobs
+        push!(y0, 0.0f0)
+        push!(y0, 0.0f0)
+        push!(y0, 0.0f0)
+    end
+
+    for i in 1:n_jobs*n_turbines
+        push!(y0, 0.0f0)
+    end
+
+    y0 = Float32.(y0)
+
+    env.y0 = deepcopy(y0)
+    env.y = deepcopy(y0)
+    env.state = env.featurize(; env = env)
+
+    y0
+end
+
+initialize_setup()
+
+
+function train(use_random_init = true; num_steps = 500_000, smoothing_window = 400, collect_every = 100, plot_every = 5000)
+    frame = 1
+
+    global train_rewards = Float64[]
+    global temp_reward_queue = CircularArrayBuffer{Float64}(smoothing_window)
+
+
+    if use_random_init
+        hook.generate_random_init = generate_random_init
+    else
+        hook.generate_random_init = false
+    end
+    
+
+
+    stop_condition = StopAfterStep(num_steps)
+
+    # run start
+    hook(PRE_EXPERIMENT_STAGE, agent, env)
+    agent(PRE_EXPERIMENT_STAGE, env)
+    is_stop = false
+    while !is_stop
+        reset!(env)
+        agent(PRE_EPISODE_STAGE, env)
+        hook(PRE_EPISODE_STAGE, agent, env)
+
+        while !is_terminated(env) # one episode
+            action = agent(env)
+
+            agent(PRE_ACT_STAGE, env, action)
+            hook(PRE_ACT_STAGE, agent, env, action)
+
+            env(action)
+
+            agent(POST_ACT_STAGE, env)
+            hook(POST_ACT_STAGE, agent, env)
+
+            frame += 1
+
+            push!(temp_reward_queue, env.reward[1])
+
+            if frame > smoothing_window && frame%collect_every == 0
+                push!(train_rewards, mean(temp_reward_queue))
+            end
+
+            if frame%plot_every == 0
+                plt = lineplot(train_rewards, title="Current smoothed rewards", xlabel="Steps", ylabel="Score")
+                println(plt)
+            end
+
+            if stop_condition(agent, env)
+                is_stop = true
+                break
+            end
+        end # end of an episode
+
+        if is_terminated(env)
+            agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
+            hook(POST_EPISODE_STAGE, agent, env)
+        end
+    end
+    hook(POST_EXPERIMENT_STAGE, agent, env)
+    # run end
+
+    # hook.rewards = clamp.(hook.rewards, -3000, 0)
+
+
+    #save()
+end
+
+
+#train()
+#train(;num_steps = 140)
+#train(;visuals = true, num_steps = 70)
+
+
+function load(number = nothing)
+    if isnothing(number)
+        global hook = FileIO.load(dirpath * "/saves/hook.jld2","hook")
+        global agent = FileIO.load(dirpath * "/saves/agent.jld2","agent")
+        #global env = FileIO.load(dirpath * "/saves/env.jld2","env")
+    else
+        global hook = FileIO.load(dirpath * "/saves/hook$number.jld2","hook")
+        global agent = FileIO.load(dirpath * "/saves/agent$number.jld2","agent")
+        #global env = FileIO.load(dirpath * "/saves/env$number.jld2","env")
+    end
+end
+
+function save(number = nothing)
+    isdir(dirpath * "/saves") || mkdir(dirpath * "/saves")
+
+    if isnothing(number)
+        FileIO.save(dirpath * "/saves/hook.jld2","hook",hook)
+        FileIO.save(dirpath * "/saves/agent.jld2","agent",agent)
+        #FileIO.save(dirpath * "/saves/env.jld2","env",env)
+    else
+        FileIO.save(dirpath * "/saves/hook$number.jld2","hook",hook)
+        FileIO.save(dirpath * "/saves/agent$number.jld2","agent",agent)
+        #FileIO.save(dirpath * "/saves/env$number.jld2","env",env)
+    end
+end
+
+
+
+function render_run(use_best = false; plot_optimal = false, steps = 6000)
+    # if use_best
+    #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
+    # end
+
+    # temp_noise = agent.policy.act_noise
+    # agent.policy.act_noise = 0.0
+
+    # temp_start_steps = agent.policy.start_steps
+    # agent.policy.start_steps  = -1
+    
+    # temp_update_after = agent.policy.update_after
+    # agent.policy.update_after = 100000
+
+    agent.policy.update_step = 0
+    global rewards = Float64[]
+    reward_sum = 0.0
+
+    #w = Window()
+
+    results = Dict("rewards" => [], "loadleft" => [])
+
+    for k in 1:n_turbines
+        results["hpc$k"] = []
+    end
+
+    global currentDF = DataFrame()
+
+    reset!(env)
+    generate_random_init()
+
+    while !env.done
+        action = agent(env)
+
+        #action = env.y[6] < 0.27 ? [-1.0] : [1.0]
+
+        env(action)
+
+        for k in 1:n_turbines
+            push!(results["hpc$k"], env.p[k])
+        end
+        push!(results["rewards"], env.reward[1])
+        push!(results["loadleft"], env.y[1])
+
+        # println(mean(env.reward))
+
+        reward_sum += mean(env.reward)
+        # push!(rewards, mean(env.reward))
+
+        tmp = DataFrame()
+        insertcols!(tmp, :timestep => env.steps)
+        insertcols!(tmp, :action => [vec(env.action)])
+        insertcols!(tmp, :p => [send_to_host(env.p)])
+        insertcols!(tmp, :y => [send_to_host(env.y)])
+        insertcols!(tmp, :reward => [reward(env)])
+        append!(hook.currentDF, tmp)
+    end
+
+    # if use_best
+    #     copyto!(agent.policy.behavior_actor, hook.currentNNA)
+    # end
+
+    # agent.policy.start_steps = temp_start_steps
+    # agent.policy.act_noise = temp_noise
+    # agent.policy.update_after = temp_update_after
+
+    println(reward_sum)
+
+
+    layout = Layout(
+                    plot_bgcolor="#f1f3f7",
+                    yaxis=attr(range=[0,1]),
+                    yaxis2 = attr(
+                        overlaying="y",
+                        side="right",
+                        titlefont_color="orange",
+                        #range=[-1, 1]
+                    ),
+                )
+
+    
+
+    to_plot = [scatter(y=results["rewards"], name="reward", yaxis = "y2"),
+                scatter(y=results["loadleft"], name="load left"),
+                scatter(y=grid_price, name="grid price")]
+
+    for k in 1:n_turbines
+        push!(to_plot, scatter(y=results["hpc$k"], name="hpc$k"))
+        push!(to_plot, scatter(y=wind[k], name="wind$k"))
+    end
+
+    if plot_optimal
+        optimal_actions = optimize_day(steps)
+        optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
+
+        for k in 1:n_turbines
+            push!(to_plot, scatter(y=optimal_actions[k,:], name="optimal_hpc$k"))
+        end
+        push!(to_plot, scatter(y=optimal_rewards, name="optimal_reward", yaxis = "y2"))
+
+
+        println("")
+        println("--------------------------------------------")
+        println("AGENT:   $reward_sum")
+        println("IPOPT:   $(sum(optimal_rewards))")
+        println("--------------------------------------------")
+    end
+
+    p = plot(Vector{AbstractTrace}(to_plot), layout)
+    display(p)
+
+end
+
+
+# train(num_steps = 14300, inner_loops = 2, outer_loops = 10)
+
+function plot_rewards(smoothing = 30)
+    to_plot = Float64[]
+    for i in smoothing:length(hook.rewards)
+        push!(to_plot, mean(hook.rewards[i+1-smoothing:i]))
+    end
+
+    p = plot(to_plot)
+    display(p)
+end
