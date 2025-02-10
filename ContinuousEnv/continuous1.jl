@@ -36,11 +36,11 @@ end
 
 
 # Global constant for the probability to spawn a new job in an empty slot.
-JOB_SPAWN_PROB = 0.02
+JOB_SPAWN_PROB = 0.1
 
 
 # Number of job slots available (e.g. 4)
-n_jobs = 4
+n_jobs = 1
 
 
 # Maximum compute slots per data center (e.g. 5)
@@ -57,7 +57,7 @@ wind = Float64[]
 
 
 # grid price model variables
-grid_model_vars = [rand() for i in 1:5] # 5 variables between 0 and 1
+grid_model_vars = rand(5) # 5 variables between 0 and 1
 grid_price = 0.0
 
 
@@ -121,17 +121,23 @@ function generate_wind()
     global wind_model_vars
     temp_wind = Float64[]
 
+    if isnothing(env)
+        time = 0.0
+    else
+        time = env.time
+    end
+
     for i in 1:n_turbines
 
-        t_mod = mod(env.time, 2π)
+        t_mod = mod(time, 2π)
 
         # Base wind
         base_wind = 0.5 + 0.5 * sin(t_mod + wind_model_vars[i,1] * 4π)
 
         # Add three additional sines based on the model vars 2,3 and 4
-        base_wind += (wind_model_vars[i,2] * 0.3) * sin(4.5 * env.time + 1.0)
-        base_wind += (wind_model_vars[i,3] * 0.2) * sin(6.2 * env.time + 1.2)
-        base_wind += (wind_model_vars[i,4] * 0.2) * sin(8.3 * env.time + 1.7)
+        base_wind += (wind_model_vars[i,2] * 0.3) * sin(4.5 * time + 1.0)
+        base_wind += (wind_model_vars[i,3] * 0.2) * sin(6.2 * time + 1.2)
+        base_wind += (wind_model_vars[i,4] * 0.2) * sin(8.3 * time + 1.7)
 
         # Add the additive grid momentum which is the last model var
         wind_val = base_wind + 0.8 * (wind_model_vars[5] - 0.3)
@@ -141,12 +147,17 @@ function generate_wind()
         
         # Update wind model wvars in a momentum fashion where the change is determined by sines
         for j in eachindex(wind_model_vars[i,:])
-            wind_model_vars[i,j] = clamp(0.8 * wind_model_vars[i,j] + 0.2 * sin(j*env.time), 0.0, 1.0)
+            wind_model_vars[i,j] = clamp(0.8 * wind_model_vars[i,j] + 0.2 * sin(j*time), 0.0, 1.0)
         end
         
         
         # Clamp the resulting wind value to [0, 1].
-        push!(temp_wind, clamp(wind_val, 0.0, 1.0))
+        wind_val = clamp(wind_val, 0.0, 1.0)
+
+        # Flip it (it was too in sync with grid price)
+        wind_val = -1 * wind_val + 1.0
+
+        push!(temp_wind, wind_val)
     end
     
     return temp_wind
@@ -164,10 +175,17 @@ end
 
 
 # Generate a grid price signal in [0,1]
+env = nothing
 function generate_grid_price()
     global grid_model_vars
     # t_day is the current time of day, in [0, 1). For example, env.time=0.25 represents 6:00 AM if 1.0 = 24 hours.
-    t_day = mod(env.time, 1.0)
+    if isnothing(env)
+        time = 0.0
+    else
+        time = env.time
+    end
+
+    t_day = mod(time, 1.0)
     
     # Base grid price: using a cosine so that:
     # - At midnight (t_day = 0), cos(0)=1 and the price is 1.
@@ -178,15 +196,15 @@ function generate_grid_price()
     scaled_base_price = (grid_model_vars[1] - 0.5) * 0.5 + ((grid_model_vars[2]*0.5) + 0.8) * base_price
 
     # Add two small additional sines based on the second two model vars
-    scaled_base_price += (grid_model_vars[3] * 0.3) * sin(9.3 * env.time)
-    scaled_base_price += (grid_model_vars[4] * 0.2) * sin(14.3 * env.time)
+    scaled_base_price += (grid_model_vars[3] * 0.3) * sin(9.3 * time)
+    scaled_base_price += (grid_model_vars[4] * 0.2) * sin(14.3 * time)
 
     # Add the additive grid momentum which is the last model var
     price_val = scaled_base_price + 0.25 * (grid_model_vars[5] - 0.5)
     
     # Update grid model wvars in a momentum fashion where the change is determined by sines
     for i in eachindex(grid_model_vars)
-        grid_model_vars[i] = clamp(0.8 * grid_model_vars[i] + 0.2 * sin(i*env.time), 0.0, 1.0)
+        grid_model_vars[i] = clamp(0.8 * grid_model_vars[i] + 0.2 * sin(i*time), 0.0, 1.0)
     end
 
     # scale down price_val
@@ -197,12 +215,12 @@ function generate_grid_price()
 end
 
 #test plot
-test_price = Float64[]
-for step in 1:(1440/5)*1
-    push!(test_price, generate_grid_price()[1])
-    env.time += dt
-end
-plot(test_price, Layout(yaxis_range=[0, 1]))
+# test_price = Float64[]
+# for step in 1:(1440/5)*1
+#     push!(test_price, generate_grid_price()[1])
+#     env.time += dt
+# end
+# plot(test_price, Layout(yaxis_range=[0, 1]))
 
 
 # Generate a curtailment threshold signal
@@ -218,10 +236,16 @@ function generate_job(current_time::Float64)::Job
 
     id_counter += 1
 
-    load = Int(max(floor(rand(Normal(160,50))),0.0))                 # Compute load in units (integer)
+    load = Int(max(floor(rand(Normal(50,10))),0.0))                 # Compute load in units (integer)
     window = rand(0.3:3.0)           # The allowed time window
     deadline = current_time + window
     penalty = max(rand(Normal(6,4)),0.0)+0.5         # Penalty that can become negative oder positive reward
+
+    load = 30
+    window = rand() * 20.5
+    deadline = current_time + window
+    penalty = 2.2
+
     return Job(new_id, load, load, current_time, deadline, penalty)
 end
 
@@ -253,9 +277,9 @@ for i in 1:n_turbines
 end
 
 for i in 1:n_jobs
-    push!(y0, 0.0f0)
-    push!(y0, 0.0f0)
-    push!(y0, 0.0f0)
+    push!(y0, 0.0f0) # remaining units
+    push!(y0, 0.0f0) # time left till deadline
+    push!(y0, 0.0f0) # penalty
 end
 
 for i in 1:n_jobs*n_turbines
@@ -272,8 +296,8 @@ y0 = Float32.(y0)
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 30.0
-nna_scale_critic = 15.0
+nna_scale = 6.4
+nna_scale_critic = 3.2
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -294,16 +318,18 @@ update_freq = 100
 
 learning_rate = 1e-5
 n_epochs = 3
-n_microbatches = 10
+n_microbatches = 4
 logσ_is_network = false
 max_σ = 10000.0f0
-entropy_loss_weight = 0.01
+actor_loss_weight = 100.0
+critic_loss_weight = 0.01
+entropy_loss_weight = 0.1
 clip_grad = 0.3
-target_kl = 1.0
+target_kl = 0.1
 clip1 = false
-start_logσ = -0.5
-tanh_end = false
-clip_range = 0.2f0
+start_logσ = 0.0
+tanh_end = true
+clip_range = 0.05f0
 
 
 
@@ -330,7 +356,8 @@ function do_step(env)
         for j in 1:n_jobs
             # Only update allocation if there is an active job in this slot.
             if job_slots[j] !== nothing
-                allocation[i, j] = max(allocation[i, j] + action[i, j], 0)
+                # allocation[i, j] = max(allocation[i, j] + action[i, j], 0)
+                allocation[i, j] = action[i, j]
             else
                 # If there is no job, make sure allocation remains 0.
                 allocation[i, j] = 0
@@ -514,8 +541,13 @@ function prepare_action(action0 = nothing, t0 = nothing; env = nothing)
         action = env.action
     end
 
+    clamp!(action, 0.0, 1.0)
+
+    # enhance a bit
+    action = action .* 5.0
+
     # convert Float32 array action to Int delta_allocation matrix
-    action = Int.(round.(reshape(action, n_turbines, n_jobs)))
+    action = Int.(floor.(reshape(action, n_turbines, n_jobs)))
 
     return action
 end
@@ -552,6 +584,8 @@ function initialize_setup(;use_random_init = false)
                 n_microbatches = n_microbatches,
                 logσ_is_network = logσ_is_network,
                 max_σ = max_σ,
+                actor_loss_weight = actor_loss_weight,
+                critic_loss_weight = critic_loss_weight,
                 entropy_loss_weight = entropy_loss_weight,
                 clip_grad = clip_grad,
                 target_kl = target_kl,
@@ -570,7 +604,7 @@ function initialize_setup(;use_random_init = false)
 end
 
 function generate_random_init()
-    global wind, grid_price, curtailment_threshold, job_slots, allocation
+    global wind, grid_price, curtailment_threshold, job_slots, allocation, wind_model_vars, grid_model_vars
 
 
     job_slots = [nothing for i in 1:n_jobs]
@@ -580,6 +614,10 @@ function generate_random_init()
     # Here the model variables can be modified before the generators are called
     
     y0 = [0.0]
+
+
+    wind_model_vars = rand(n_turbines, 5)
+    grid_model_vars = rand(5)
 
     wind = generate_wind()
 
@@ -621,7 +659,7 @@ end
 initialize_setup()
 
 train_rewards = Float64[]
-temp_reward_queue::CircularArrayBuffer{Float64}
+temp_reward_queue::CircularArrayBuffer{Float64} = CircularArrayBuffer{Float64}(1)
 
 
 function train(use_random_init = true; num_steps = 500_000, smoothing_window = 400, collect_every = 100, plot_every = 5000)
@@ -730,7 +768,7 @@ end
 
 
 
-function render_run(steps = 864)
+function render_run(steps = 864, make_deterministic = true)
     # if use_best
     #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
     # end
@@ -744,8 +782,10 @@ function render_run(steps = 864)
     # temp_update_after = agent.policy.update_after
     # agent.policy.update_after = 100000
 
-    temp_logσ = agent.policy.approximator.actor.logσ
-    agent.policy.approximator.actor.logσ[:,:] = -7 .* ones(4,1)
+    if !(agent.policy.approximator.actor.logσ_is_network) && make_deterministic
+        temp_logσ = deepcopy(agent.policy.approximator.actor.logσ)
+        agent.policy.approximator.actor.logσ[:,:] = -7 .* ones(n_jobs*n_turbines,1)
+    end
 
     global rewards = Float64[]
     reward_sum = 0.0
@@ -768,6 +808,9 @@ function render_run(steps = 864)
 
     reset!(env)
     generate_random_init()
+
+    # set random time
+    env.time = rand()*10000
 
     for i in 1:steps
         action = agent(env)
@@ -797,6 +840,10 @@ function render_run(steps = 864)
 
     end
 
+    if !(agent.policy.approximator.actor.logσ_is_network) && make_deterministic
+        agent.policy.approximator.actor.logσ[:,:] = temp_logσ
+    end
+
     # if use_best
     #     copyto!(agent.policy.behavior_actor, hook.currentNNA)
     # end
@@ -821,25 +868,25 @@ function render_run(steps = 864)
 
     
 
-    p = make_subplots(rows=3+n_jobs, cols=1)
+    p = make_subplots(rows=2+n_jobs, cols=1)
 
     # global to_plot = [scatter(y=results["rewards"], name="reward", yaxis = "y2"),
     #             scatter(y=results["grid_price"], name="grid price")]
 
-    #add_trace!(p, scatter(y=results["rewards"], name="reward", yaxis = "y2"), row = 3)
-    add_trace!(p, scatter(y=results["grid_price"], name="grid price"), row = 3, col = 1)
+    add_trace!(p, scatter(y=results["rewards"], name="reward", yaxis = "y2"), row = 1)
+    add_trace!(p, scatter(y=results["grid_price"], name="grid price"), row = 2, col = 1)
 
     for k in 1:n_turbines
         #push!(to_plot, scatter(y=results["wind$(k)"], name="wind$(k)"))
-        add_trace!(p, scatter(y=results["wind$(k)"], name="wind$(k)"), row = 3, col = 1)
+        add_trace!(p, scatter(y=results["wind$(k)"], name="wind$(k)"), row = 2, col = 1)
     end
     
     for k in 1:n_jobs
-        add_trace!(p, scatter(y=results["job$(k)_remaining"], name="job$(k) remaining"), row = 3+k, col = 1)
+        add_trace!(p, scatter(y=results["job$(k)_remaining"], name="job$(k) remaining"), row = 2+k, col = 1)
     end
 
 
-    relayout!(p, layout.fields)
+    #relayout!(p, layout.fields)
     display(p)
 
 end
