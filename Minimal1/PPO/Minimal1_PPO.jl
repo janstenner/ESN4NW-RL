@@ -136,14 +136,14 @@ nna_scale = 20.0
 nna_scale_critic = 11.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
-fun = leakyrelu
+fun = gelu
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
 
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.997f0
+y = 0.9997f0
 p = 0.95f0
 
 start_steps = -1
@@ -152,16 +152,16 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 100
 
 
-learning_rate = 1e-4
+learning_rate = 1e-5
 n_epochs = 3
 n_microbatches = 10
-logσ_is_network = false
+logσ_is_network = true
 max_σ = 10000.0f0
 entropy_loss_weight = 0.01
 clip_grad = 0.3
-target_kl = 0.1
+target_kl = 0.8
 clip1 = false
-start_logσ = -0.5
+start_logσ = -0.3
 tanh_end = false
 clip_range = 0.05f0
 
@@ -637,7 +637,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
-            render_run()
+            render_run(; training_episode = length(hook.rewards))
         end
 
 
@@ -685,7 +685,7 @@ end
 
 
 
-function render_run(use_best = false; plot_optimal = false, steps = 6000)
+function render_run(use_best = false; plot_optimal = false, steps = 6000, training_episode = 0)
     # if use_best
     #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
     # end
@@ -699,11 +699,14 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
     # temp_update_after = agent.policy.update_after
     # agent.policy.update_after = 100000
 
+
     agent.policy.update_step = 0
     global rewards = Float64[]
     reward_sum = 0.0
 
     #w = Window()
+
+    xx = collect(0:(1/12):23+(11/12))
 
     results = Dict("rewards" => [], "loadleft" => [])
 
@@ -717,7 +720,7 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
     generate_random_init()
 
     while !env.done
-        action = agent(env)
+        action = prob(agent.policy, env).μ
 
         #action = env.y[6] < 0.27 ? [-1.0] : [1.0]
 
@@ -755,8 +758,19 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
 
 
     layout = Layout(
-                    plot_bgcolor="#f1f3f7",
-                    yaxis=attr(range=[0,1]),
+                    plot_bgcolor = "white",
+                    font=attr(
+                        family="Arial",
+                        size=16,
+                        color="black"
+                    ),
+                    showlegend = true,
+                    legend=attr(x=0.5, y=1.1, orientation="h", xanchor="center"),
+                    xaxis = attr(gridcolor = "#E0E0E0FF",
+                                linecolor = "#888888"),
+                    yaxis = attr(gridcolor = "#E0E0E0FF",
+                                linecolor = "#888888",
+                                range=[0,1]),
                     yaxis2 = attr(
                         overlaying="y",
                         side="right",
@@ -765,25 +779,29 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
                     ),
                 )
 
+    if training_episode != 0
+        layout.title = "Evaluation Episode after $(training_episode) Training Episodes"
+    end
+
     
 
-    to_plot = [scatter(y=results["rewards"], name="reward", yaxis = "y2"),
-                scatter(y=results["loadleft"], name="load left"),
-                scatter(y=grid_price, name="grid price")]
+    to_plot = [scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"),
+                scatter(x=xx, y=results["loadleft"], name="Load Left"),
+                scatter(x=xx, y=grid_price, name="Grid Price")]
 
     for k in 1:n_turbines
-        push!(to_plot, scatter(y=results["hpc$k"], name="hpc$k"))
-        push!(to_plot, scatter(y=wind[k], name="wind$k"))
+        push!(to_plot, scatter(x=xx, y=results["hpc$k"], name="WindCORE utilization $k"))
+        push!(to_plot, scatter(x=xx, y=wind[k], name="Wind Power $k"))
     end
 
     if plot_optimal
-        optimal_actions = optimize_day(steps)
-        optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
+        global optimal_actions = optimize_day(steps)
+        global optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
 
         for k in 1:n_turbines
-            push!(to_plot, scatter(y=optimal_actions[k,:], name="optimal_hpc$k"))
+            push!(to_plot, scatter(x=xx, y=optimal_actions[k,:], name="Optimal HPC$k"))
         end
-        push!(to_plot, scatter(y=optimal_rewards, name="optimal_reward", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=optimal_rewards, name="Optimal Reward", yaxis = "y2"))
 
 
         println("")

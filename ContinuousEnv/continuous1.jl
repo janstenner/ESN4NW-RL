@@ -98,7 +98,7 @@ state_dim = 4 + 3*n_turbines + 3*n_jobs + n_turbines * n_jobs
 # env parameters
 
 seed = Int(floor(rand()*100000))
-# seed = 800
+seed = 62759
 
 gpu_env = false
 
@@ -241,10 +241,10 @@ function generate_job(current_time::Float64)::Job
     deadline = current_time + window
     penalty = max(rand(Normal(6,4)),0.0)+0.5         # Penalty that can become negative oder positive reward
 
-    load = 30
-    window = rand() * 20.5
+    load = Int(max(floor(rand(Normal(40,10))),0.0))
+    window = rand() * 0.5 + ((Int(ceil(load/5))) / 288)
     deadline = current_time + window
-    penalty = 2.2
+    penalty = max(rand(Normal(1.5,0.3)),0.0)+0.3
 
     return Job(new_id, load, load, current_time, deadline, penalty)
 end
@@ -313,19 +313,19 @@ p = 0.95f0
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 100
+update_freq = 400
 
 
-learning_rate = 1e-5
-n_epochs = 3
-n_microbatches = 4
-logσ_is_network = false
+learning_rate = 1e-6
+n_epochs = 12
+n_microbatches = 5
+logσ_is_network = true
 max_σ = 10000.0f0
 actor_loss_weight = 100.0
 critic_loss_weight = 0.01
-entropy_loss_weight = 0.1
+entropy_loss_weight = 0.05
 clip_grad = 0.3
-target_kl = 0.1
+target_kl = Inf
 clip1 = false
 start_logσ = 0.0
 tanh_end = true
@@ -662,7 +662,7 @@ train_rewards = Float64[]
 temp_reward_queue::CircularArrayBuffer{Float64} = CircularArrayBuffer{Float64}(1)
 
 
-function train(use_random_init = true; num_steps = 500_000, smoothing_window = 400, collect_every = 100, plot_every = 5000)
+function train(use_random_init = true; num_steps = 5_000_000, smoothing_window = 400, collect_every = 100, plot_every = 5000)
     frame = 1
 
     global train_rewards
@@ -712,6 +712,10 @@ function train(use_random_init = true; num_steps = 500_000, smoothing_window = 4
             if frame%plot_every == 0
                 plt = lineplot(train_rewards, title="Current smoothed rewards", xlabel="Steps", ylabel="Score")
                 println(plt)
+            end
+        
+            if frame%100_000 == 0
+                render_run()
             end
 
             if stop_condition(agent, env)
@@ -800,6 +804,7 @@ function render_run(steps = 864, make_deterministic = true)
 
     for k in 1:n_jobs
         results["job$(k)_remaining"] = []
+        results["job$(k)_compute"] = []
         results["job$(k)_penalty"] = []
         results["job$(k)_time_left"] = []
     end
@@ -827,6 +832,7 @@ function render_run(steps = 864, make_deterministic = true)
             push!(results["job$(k)_remaining"], env.y[4 + n_turbines * 3 + 1 + (k-1) * 3])
             push!(results["job$(k)_time_left"], env.y[4 + n_turbines * 3 + 2 + (k-1) * 3])
             push!(results["job$(k)_penalty"], env.y[4 + n_turbines * 3 + 3 + (k-1) * 3])
+            push!(results["job$(k)_compute"], sum(env.p[:,k]))
         end
 
         push!(results["rewards"], env.reward[1])
@@ -882,7 +888,8 @@ function render_run(steps = 864, make_deterministic = true)
     end
     
     for k in 1:n_jobs
-        add_trace!(p, scatter(y=results["job$(k)_remaining"], name="job$(k) remaining"), row = 2+k, col = 1)
+        # add_trace!(p, scatter(y=results["job$(k)_remaining"], name="job$(k) remaining"), row = 2+k, col = 1)
+        add_trace!(p, scatter(y=results["job$(k)_compute"], name="job$(k) compute"), row = 2+k, col = 1)
     end
 
 
