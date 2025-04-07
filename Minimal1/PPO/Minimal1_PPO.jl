@@ -84,8 +84,9 @@ curtailment_threshold = 0.4
 # state vector
 
 # - amount of computation left (starts at 1.0 and goes to 0.0)
-# - wind stituation at every turbine (gradient of power output, current power output and curtailment enegry)
-# - current gradient and price of energy from the grid
+# - price of energy from the grid (last 5 steps)
+# - current curtailment threshold
+# - wind stituation at every turbine (last 5 steps) plus current wind power minus curtailment threshold
 # - current time
 
 function create_state(; env = nothing, compute_left = 1.0, step = 1)
@@ -101,23 +102,55 @@ function create_state(; env = nothing, compute_left = 1.0, step = 1)
 
         step = 2
         time = 0.0
-        
+
     else
         y = [compute_left]
 
         time = env.time / env.te
     end
 
-    for i in 1:n_turbines
-        push!(y, wind[i][step] - wind[i][step-1])
-        push!(y, wind[i][step])
-        push!(y, max(0.0, wind[i][step] - curtailment_threshold))
+    push!(y, grid_price[step])
+    push!(y, grid_price[step-1])
+    if step-2 > 0
+        push!(y, grid_price[step-2])
+    else
+        push!(y, grid_price[step-1])
+    end
+    if step-3 > 0
+        push!(y, grid_price[step-3])
+    else
+        push!(y, grid_price[step-1])
+    end
+    if step-4 > 0
+        push!(y, grid_price[step-4])
+    else
+        push!(y, grid_price[step-1])
     end
 
     push!(y, curtailment_threshold)
 
-    push!(y, grid_price[step] - grid_price[step-1])
-    push!(y, grid_price[step])
+    for i in 1:n_turbines
+        push!(y, wind[i][step])
+        push!(y, wind[i][step-1])
+        
+        if step-2 > 0
+            push!(y, wind[i][step-2])
+        else
+            push!(y, wind[i][step-1])
+        end
+        if step-3 > 0
+            push!(y, wind[i][step-3])
+        else
+            push!(y, wind[i][step-1])
+        end
+        if step-4 > 0
+            push!(y, wind[i][step-4])
+        else
+            push!(y, wind[i][step-1])
+        end
+
+        push!(y, max(0.0, wind[i][step] - curtailment_threshold))
+    end
 
     push!(y, time)
 
