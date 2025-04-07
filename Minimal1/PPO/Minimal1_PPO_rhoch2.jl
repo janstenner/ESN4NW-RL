@@ -136,7 +136,7 @@ nna_scale = 20.0
 nna_scale_critic = 11.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
-fun = leakyrelu
+fun = gelu
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
 
@@ -563,7 +563,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
-            render_run(;plot_optimal=true, steps=2000)
+            render_run() #;plot_optimal=true, steps=2000)
         end
 
 
@@ -611,7 +611,13 @@ end
 
 
 
-function render_run(use_best = false; plot_optimal = false, steps = 6000)
+function render_run(use_best = false; plot_optimal = false, steps = 6000, show_training_episode = true)
+
+    if show_training_episode
+        training_episode = length(hook.rewards)
+    end
+
+
     # if use_best
     #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
     # end
@@ -625,11 +631,14 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
     # temp_update_after = agent.policy.update_after
     # agent.policy.update_after = 100000
 
+
     agent.policy.update_step = 0
     global rewards = Float64[]
     reward_sum = 0.0
 
     #w = Window()
+
+    xx = collect(0:(1/12):23+(11/12))
 
     results = Dict("rewards" => [], "loadleft" => [])
 
@@ -643,7 +652,7 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
     generate_random_init()
 
     while !env.done
-        action = agent(env)
+        action = prob(agent.policy, env).μ
 
         #action = env.y[6] < 0.27 ? [-1.0] : [1.0]
 
@@ -681,8 +690,19 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
 
 
     layout = Layout(
-                    plot_bgcolor="#f1f3f7",
-                    yaxis=attr(range=[0,1]),
+                    plot_bgcolor = "white",
+                    font=attr(
+                        family="Arial",
+                        size=16,
+                        color="black"
+                    ),
+                    showlegend = true,
+                    legend=attr(x=0.5, y=1.1, orientation="h", xanchor="center"),
+                    xaxis = attr(gridcolor = "#E0E0E0FF",
+                                linecolor = "#888888"),
+                    yaxis = attr(gridcolor = "#E0E0E0FF",
+                                linecolor = "#888888",
+                                range=[0,1]),
                     yaxis2 = attr(
                         overlaying="y",
                         side="right",
@@ -691,25 +711,29 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000)
                     ),
                 )
 
+    if show_training_episode
+        layout.title = "Evaluation Episode after $(training_episode) Training Episodes"
+    end
+
     
 
-    to_plot = [scatter(y=results["rewards"], name="reward", yaxis = "y2"),
-                scatter(y=results["loadleft"], name="load left"),
-                scatter(y=grid_price, name="grid price")]
+    to_plot = [scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"),
+                scatter(x=xx, y=results["loadleft"], name="Load Left"),
+                scatter(x=xx, y=grid_price, name="Grid Price")]
 
     for k in 1:n_turbines
-        push!(to_plot, scatter(y=results["hpc$k"], name="hpc$k"))
-        push!(to_plot, scatter(y=wind[k], name="wind$k"))
+        push!(to_plot, scatter(x=xx, y=results["hpc$k"], name="WindCORE utilization $k"))
+        push!(to_plot, scatter(x=xx, y=wind[k], name="Wind Power $k"))
     end
 
     if plot_optimal
-        optimal_actions = optimize_day(steps)
-        optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
+        global optimal_actions = optimize_day(steps)
+        global optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
 
         for k in 1:n_turbines
-            push!(to_plot, scatter(y=optimal_actions[k,:], name="optimal_hpc$k"))
+            push!(to_plot, scatter(x=xx, y=optimal_actions[k,:], name="Optimal HPC$k"))
         end
-        push!(to_plot, scatter(y=optimal_rewards, name="optimal_reward", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=optimal_rewards, name="Optimal Reward", yaxis = "y2"))
 
 
         println("")

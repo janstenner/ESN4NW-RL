@@ -136,14 +136,14 @@ nna_scale = 20.0
 nna_scale_critic = 11.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
-fun = gelu
+fun = leakyrelu
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
 
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.9997f0
+y = 0.997f0
 p = 0.95f0
 
 start_steps = -1
@@ -152,16 +152,16 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 100
 
 
-learning_rate = 1e-5
+learning_rate = 1e-4
 n_epochs = 3
 n_microbatches = 10
-logσ_is_network = true
+logσ_is_network = false
 max_σ = 10000.0f0
 entropy_loss_weight = 0.01
 clip_grad = 0.3
-target_kl = 0.8
+target_kl = 0.1
 clip1 = false
-start_logσ = -0.3
+start_logσ = -0.5
 tanh_end = false
 clip_range = 0.05f0
 
@@ -637,7 +637,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
-            render_run(; training_episode = length(hook.rewards))
+            render_run()
         end
 
 
@@ -685,7 +685,13 @@ end
 
 
 
-function render_run(use_best = false; plot_optimal = false, steps = 6000, training_episode = 0)
+function render_run(use_best = false; plot_optimal = false, steps = 6000, show_training_episode = true)
+
+    if show_training_episode
+        training_episode = length(hook.rewards)
+    end
+
+
     # if use_best
     #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
     # end
@@ -779,7 +785,7 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000, traini
                     ),
                 )
 
-    if training_episode != 0
+    if show_training_episode
         layout.title = "Evaluation Episode after $(training_episode) Training Episodes"
     end
 
