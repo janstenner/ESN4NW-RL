@@ -33,35 +33,6 @@ end
 
 
 
-# action vector dim - contains the percentage of maximum power the HPC in the turbine will use for the duration of next time step
-
-action_dim = n_turbines
-
-# state vector
-
-# - amount of computation left (starts at 1.0 and goes to 0.0)
-# - wind stituation at every turbine (gradient of power output, current power output and curtailment enegry)
-# - current gradient and price of energy from the grid
-# - current time
-
-state_dim = 4 + 3*n_turbines
-
-
-
-# env parameters
-
-seed = Int(floor(rand()*100000))
-# seed = 800
-
-gpu_env = false
-
-te = 1440.0
-dt = 5.0
-t0 = 0.0
-min_best_episode = 1
-
-sim_space = Space(fill(0..1, (state_dim)))
-
 function generate_wind()
     wind_constant_day = rand()
     deviation = 1/5
@@ -101,33 +72,79 @@ function generate_grid_price()
     return gp
 end
 
-y0 = [1.0]
 
-wind = [generate_wind() for i in 1:n_turbines]
 
-# layout = Layout(
-#                 plot_bgcolor="#f1f3f7",
-#                 yaxis=attr(range=[0,1]),
-#             )
+# action vector dim - contains the percentage of maximum power the HPC in the turbine will use for the duration of next time step
+action_dim = n_turbines
 
-# to_plot = [scatter(y=wind[i]) for i in 1:1]
-# plot(Vector{AbstractTrace}(to_plot), layout)
 
-grid_price = generate_grid_price()
-plot(scatter(y=grid_price), Layout(yaxis=attr(range=[0,1])))
+# Curtailment threshold
+curtailment_threshold = 0.4
 
-for i in 1:n_turbines
-    push!(y0, wind[i][2] - wind[i][1])
-    push!(y0, wind[i][2])
-    push!(y0, max(0.0, wind[i][2] - 0.4))
+# state vector
+
+# - amount of computation left (starts at 1.0 and goes to 0.0)
+# - wind stituation at every turbine (gradient of power output, current power output and curtailment enegry)
+# - current gradient and price of energy from the grid
+# - current time
+
+function create_state(; env = nothing, compute_left = 1.0, step = 1)
+    global wind, grid_price, curtailment_threshold
+
+
+    if isnothing(env)
+        y = [1.0]
+
+        wind = [generate_wind() for i in 1:n_turbines]
+
+        grid_price = generate_grid_price()
+
+        step = 2
+        time = 0.0
+        
+    else
+        y = [compute_left]
+
+        time = env.time / env.te
+    end
+
+    for i in 1:n_turbines
+        push!(y, wind[i][step] - wind[i][step-1])
+        push!(y, wind[i][step])
+        push!(y, max(0.0, wind[i][step] - curtailment_threshold))
+    end
+
+    push!(y, curtailment_threshold)
+
+    push!(y, grid_price[step] - grid_price[step-1])
+    push!(y, grid_price[step])
+
+    push!(y, time)
+
+
+    Float32.(y)
 end
 
-push!(y0, grid_price[2] - grid_price[1])
-push!(y0, grid_price[2])
+y0 = create_state()
+state_dim = length(y0)
 
-push!(y0, 0.0)
 
-y0 = Float32.(y0)
+
+
+# env parameters
+
+seed = Int(floor(rand()*100000))
+# seed = 800
+
+gpu_env = false
+
+te = 1440.0
+dt = 5.0
+t0 = 0.0
+min_best_episode = 1
+
+sim_space = Space(fill(0..1, (state_dim)))
+
 
 
 # agent tuning parameters
@@ -197,7 +214,7 @@ end
 function do_step(env)
     global wind_only
     
-    y = [ env.y[1] ]
+    compute_left = env.y[1]
     step = env.steps + 2
 
     compute_power = 0.0
@@ -206,11 +223,11 @@ function do_step(env)
     end
 
     # subtracting the computed load
-    compute_power_used = min(y[1], compute_power)
-    y[1] -= compute_power
-    y[1] = max(y[1], 0.0)
+    compute_power_used = min(compute_left, compute_power)
+    compute_left -= compute_power
+    compute_left = max(compute_left, 0.0)
 
-    if y[1] == 0.0
+    if compute_left == 0.0
         env.done = true
     end
 
@@ -253,7 +270,7 @@ function do_step(env)
         reward = - reward1
 
         if (env.time + env.dt) >= env.te 
-            reward -= y[1] * 2
+            reward -= 2 #y[1] * 2
         else
             #reward shaping
             #reward = (-1) * abs((reward * 45))^2.2
@@ -267,22 +284,7 @@ function do_step(env)
     #env.reward = [ -(reward^2)]
     env.reward = [reward]
     
-
-    
-    for i in 1:n_turbines
-        push!(y, wind[i][step] - wind[i][step-1])
-        push!(y, wind[i][step])
-        push!(y, max(0.0, wind[i][step] - 0.4))
-    end
-
-    push!(y, grid_price[step] - grid_price[step-1])
-    push!(y, grid_price[step])
-
-    push!(y, env.time / env.te)
-
-    
-
-    y = Float32.(y)
+    y = create_state(; env = env, compute_left = compute_left, step = step)
 
     return y
 end
@@ -366,26 +368,7 @@ function initialize_setup(;use_random_init = false)
 end
 
 function generate_random_init()
-    global wind_constant_day, wind, grid_price
-
-    y0 = [1.0]
-
-    wind = [generate_wind() for i in 1:n_turbines]
-
-    grid_price = generate_grid_price()
-
-    for i in 1:n_turbines
-        push!(y0, wind[i][2] - wind[i][1])
-        push!(y0, wind[i][2])
-        push!(y0, max(0.0, wind[i][2] - 0.4))
-    end
-    
-    push!(y0, grid_price[2] - grid_price[1])
-    push!(y0, grid_price[2])
-    
-    push!(y0, 0.0)
-
-    y0 = Float32.(y0)
+    y0 = create_state()
 
     env.y0 = deepcopy(y0)
     env.y = deepcopy(y0)
