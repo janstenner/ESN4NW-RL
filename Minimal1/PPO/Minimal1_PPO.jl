@@ -33,6 +33,19 @@ end
 
 
 
+# env parameters
+
+seed = Int(floor(rand()*100000))
+# seed = 800
+
+gpu_env = false
+
+te = 1440.0
+dt = 5.0
+t0 = 0.0
+min_best_episode = 1
+
+
 function generate_wind()
     wind_constant_day = rand()
     deviation = 1/5
@@ -160,21 +173,6 @@ end
 
 y0 = create_state()
 state_dim = length(y0)
-
-
-
-
-# env parameters
-
-seed = Int(floor(rand()*100000))
-# seed = 800
-
-gpu_env = false
-
-te = 1440.0
-dt = 5.0
-t0 = 0.0
-min_best_episode = 1
 
 sim_space = Space(fill(0..1, (state_dim)))
 
