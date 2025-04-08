@@ -17,7 +17,9 @@ using Ipopt
 
 
 n_windCORES = 1
-n_turbines = 1
+n_turbines = 2
+
+wind_factor = 1/n_turbines
 
 
 scriptname = "Minimal1"
@@ -244,7 +246,7 @@ end
 # plot(scatter(y=softplus_shifted.(xx), x=xx))
 
 function calculate_day(action, env, step = nothing)
-    global curtailment_threshold, wind, grid_price
+    global curtailment_threshold, wind, grid_price, wind_factor
 
     if !isnothing(env)
         global wind_only
@@ -284,7 +286,7 @@ function calculate_day(action, env, step = nothing)
 
         for i in 1:n_turbines
             # curtailment energy onlny when wind is above 0.4
-            temp_free_power = (wind[i][step-1] - curtailment_threshold)
+            temp_free_power = (wind[i][step-1] - curtailment_threshold) * wind_factor
             temp_free_power = max(0.0, temp_free_power)
 
             power_for_free += temp_free_power
@@ -299,7 +301,7 @@ function calculate_day(action, env, step = nothing)
         for i in 1:n_turbines
 
             # curtailment energy onlny when wind is above 0.4
-            temp_free_power = (wind[i][step-1] - curtailment_threshold)
+            temp_free_power = (wind[i][step-1] - curtailment_threshold) * wind_factor
             temp_free_power = max(0.0, temp_free_power)
 
             power_for_free += temp_free_power
