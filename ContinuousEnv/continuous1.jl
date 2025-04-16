@@ -98,7 +98,7 @@ state_dim = 4 + 3*n_turbines + 3*n_jobs + n_turbines * n_jobs
 # env parameters
 
 seed = Int(floor(rand()*100000))
-seed = 62759
+#seed = 62759
 
 gpu_env = false
 
@@ -242,9 +242,9 @@ function generate_job(current_time::Float64)::Job
     penalty = max(rand(Normal(6,4)),0.0)+0.5         # Penalty that can become negative oder positive reward
 
     load = Int(max(floor(rand(Normal(40,10))),0.0))
-    window = rand() * 0.5 + ((Int(ceil(load/5))) / 288)
+    window = rand() * 0.4 + ((Int(ceil(load/5))) / 288)
     deadline = current_time + window
-    penalty = max(rand(Normal(1.5,0.3)),0.0)+0.3
+    penalty = max(rand(Normal(1.5,0.3)),0.0)+0.7
 
     return Job(new_id, load, load, current_time, deadline, penalty)
 end
@@ -296,8 +296,8 @@ y0 = Float32.(y0)
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 6.4
-nna_scale_critic = 3.2
+nna_scale = 2.0
+nna_scale_critic = 2.0
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -316,20 +316,20 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 400
 
 
-learning_rate = 1e-6
-n_epochs = 12
-n_microbatches = 5
+learning_rate = 1e-4
+n_epochs = 4
+n_microbatches = 10
 logσ_is_network = true
-max_σ = 10000.0f0
+max_σ = 1.0f0
 actor_loss_weight = 100.0
 critic_loss_weight = 0.01
-entropy_loss_weight = 0.05
-clip_grad = 0.3
+entropy_loss_weight = 0.005
+clip_grad = 0.5
 target_kl = Inf
 clip1 = false
 start_logσ = 0.0
 tanh_end = true
-clip_range = 0.05f0
+clip_range = 0.2f0
 
 
 
@@ -786,10 +786,10 @@ function render_run(steps = 864, make_deterministic = true)
     # temp_update_after = agent.policy.update_after
     # agent.policy.update_after = 100000
 
-    if !(agent.policy.approximator.actor.logσ_is_network) && make_deterministic
-        temp_logσ = deepcopy(agent.policy.approximator.actor.logσ)
-        agent.policy.approximator.actor.logσ[:,:] = -7 .* ones(n_jobs*n_turbines,1)
-    end
+    # if !(agent.policy.approximator.actor.logσ_is_network) && make_deterministic
+    #     temp_logσ = deepcopy(agent.policy.approximator.actor.logσ)
+    #     agent.policy.approximator.actor.logσ[:,:] = -7 .* ones(n_jobs*n_turbines,1)
+    # end
 
     global rewards = Float64[]
     reward_sum = 0.0
@@ -818,9 +818,13 @@ function render_run(steps = 864, make_deterministic = true)
     env.time = rand()*10000
 
     for i in 1:steps
-        action = agent(env)
+        #action = agent(env)
 
-        #action = env.y[6] < 0.27 ? [-1.0] : [1.0]
+
+        prob_temp = prob(agent.policy, env)
+        action = prob_temp.μ
+        σ = prob_temp.σ
+
 
         env(action)
 
@@ -846,9 +850,9 @@ function render_run(steps = 864, make_deterministic = true)
 
     end
 
-    if !(agent.policy.approximator.actor.logσ_is_network) && make_deterministic
-        agent.policy.approximator.actor.logσ[:,:] = temp_logσ
-    end
+    # if !(agent.policy.approximator.actor.logσ_is_network) && make_deterministic
+    #     agent.policy.approximator.actor.logσ[:,:] = temp_logσ
+    # end
 
     # if use_best
     #     copyto!(agent.policy.behavior_actor, hook.currentNNA)
@@ -898,3 +902,14 @@ function render_run(steps = 864, make_deterministic = true)
 
 end
 
+
+
+function plot_rewards(smoothing = 30)
+    to_plot = Float64[]
+    for i in smoothing:length(train_rewards)
+        push!(to_plot, mean(train_rewards[i+1-smoothing:i]))
+    end
+
+    p = plot(to_plot)
+    display(p)
+end

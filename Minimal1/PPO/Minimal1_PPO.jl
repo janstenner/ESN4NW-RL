@@ -48,45 +48,6 @@ t0 = 0.0
 min_best_episode = 1
 
 
-function generate_wind()
-    wind_constant_day = rand()
-    deviation = 1/5
-
-    result = sign(randn()) * sin.(collect(LinRange(rand()*3+1, 4+rand()*4, Int(te/dt)+1)))
-
-    for i in 1:4
-        result += sign(randn()) * sin.(collect(LinRange(rand()+4, 5+rand()*i*4, Int(te/dt)+1)))
-    end
-
-    result .-= minimum(result)
-    result ./= maximum(result)
-    result .*= deviation
-
-    day_wind = sign(randn()) * sin.(collect(LinRange(wind_constant_day*2*pi, 2+wind_constant_day*2*pi, Int(te/dt)+1)))
-    day_wind .+= 1.0
-    day_wind ./= 4
-    day_wind .+= 0.25
-
-
-    result .+= day_wind
-
-    clamp!(result, -1.0, 1.0)
-
-    result
-end
-
-function generate_grid_price()
-
-    factor = 1.0;
-    factor = 0.6;
-
-    gp = (-sin.(collect(LinRange(rand()*1.5*factor, 2+rand()*2.5*factor, Int(te/dt)+1))) .+(1+(rand()*factor)))
-
-    clamp!(gp, -1, 1)
-
-    return gp
-end
-
 
 
 # action vector dim - contains the percentage of maximum power the HPC in the turbine will use for the duration of next time step
@@ -104,8 +65,56 @@ curtailment_threshold = 0.4
 # - wind stituation at every turbine (last 5 steps) plus current wind power minus curtailment threshold
 # - current time
 
-function create_state(; env = nothing, compute_left = 1.0, step = 1)
-    global wind, grid_price, curtailment_threshold
+history_steps = 5
+
+function generate_wind()
+    global history_steps, te, dt
+
+    wind_steps = Int(te/dt) + history_steps - 1
+
+    wind_constant_day = rand()
+    deviation = 1/5
+
+    result = sign(randn()) * sin.(collect(LinRange(rand()*3+1, 4+rand()*4, wind_steps)))
+
+    for i in 1:4
+        result += sign(randn()) * sin.(collect(LinRange(rand()+4, 5+rand()*i*4, wind_steps)))
+    end
+
+    result .-= minimum(result)
+    result ./= maximum(result)
+    result .*= deviation
+
+    day_wind = sign(randn()) * sin.(collect(LinRange(wind_constant_day*2*pi, 2+wind_constant_day*2*pi, wind_steps)))
+    day_wind .+= 1.0
+    day_wind ./= 4
+    day_wind .+= 0.25
+
+
+    result .+= day_wind
+
+    clamp!(result, -1.0, 1.0)
+
+    result
+end
+
+function generate_grid_price()
+    global history_steps, te, dt
+
+    grid_price_steps = Int(te/dt) + history_steps -1
+
+    factor = 1.0;
+    factor = 0.6;
+
+    gp = (-sin.(collect(LinRange(rand()*1.5*factor, 2+rand()*2.5*factor, grid_price_steps))) .+(1+(rand()*factor)))
+
+    clamp!(gp, -1, 1)
+
+    return gp
+end
+
+function create_state(; env = nothing, compute_left = 1.0, step = 0)
+    global wind, grid_price, curtailment_threshold, history_steps
 
 
     if isnothing(env)
@@ -115,7 +124,6 @@ function create_state(; env = nothing, compute_left = 1.0, step = 1)
 
         grid_price = generate_grid_price()
 
-        step = 2
         time = 0.0
 
     else
@@ -124,47 +132,21 @@ function create_state(; env = nothing, compute_left = 1.0, step = 1)
         time = env.time / env.te
     end
 
-    push!(y, grid_price[step])
-    push!(y, grid_price[step-1])
-    if step-2 > 0
-        push!(y, grid_price[step-2])
-    else
-        push!(y, grid_price[step-1])
+
+    for i in history_steps:-1:1
+        push!(y, grid_price[i+step])
     end
-    if step-3 > 0
-        push!(y, grid_price[step-3])
-    else
-        push!(y, grid_price[step-1])
-    end
-    if step-4 > 0
-        push!(y, grid_price[step-4])
-    else
-        push!(y, grid_price[step-1])
-    end
+
 
     push!(y, curtailment_threshold)
 
     for i in 1:n_turbines
-        push!(y, wind[i][step])
-        push!(y, wind[i][step-1])
-        
-        if step-2 > 0
-            push!(y, wind[i][step-2])
-        else
-            push!(y, wind[i][step-1])
-        end
-        if step-3 > 0
-            push!(y, wind[i][step-3])
-        else
-            push!(y, wind[i][step-1])
-        end
-        if step-4 > 0
-            push!(y, wind[i][step-4])
-        else
-            push!(y, wind[i][step-1])
+
+        for j in history_steps:-1:1
+            push!(y, wind[i][j+step])
         end
 
-        push!(y, max(0.0, wind[i][step] - curtailment_threshold))
+        push!(y, max(0.0, wind[i][history_steps+step] - curtailment_threshold))
     end
 
     push!(y, time)
@@ -182,11 +164,11 @@ sim_space = Space(fill(0..1, (state_dim)))
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 20.0
-nna_scale_critic = 11.0
+nna_scale = 4.0
+nna_scale_critic = 2.5
 drop_middle_layer = false
 drop_middle_layer_critic = false
-fun = leakyrelu
+fun = gelu
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
 
@@ -199,21 +181,23 @@ p = 0.95f0
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 100
+update_freq = 400
 
 
-learning_rate = 1e-4
+learning_rate = 1e-5
 n_epochs = 3
-n_microbatches = 10
-logσ_is_network = false
-max_σ = 10000.0f0
-entropy_loss_weight = 0.01
-clip_grad = 0.3
-target_kl = 0.1
+n_microbatches = 20
+logσ_is_network = true
+max_σ = 1.0f0
+entropy_loss_weight = 0#.1
+clip_grad = 0.5
+target_kl = 10.1
 clip1 = false
 start_logσ = -0.5
 tanh_end = false
-clip_range = 0.05f0
+clip_range = 0.2f0
+
+betas = (0.9, 0.99)
 
 
 
@@ -244,17 +228,19 @@ end
 # plot(scatter(y=softplus_shifted.(xx), x=xx))
 
 function calculate_day(action, env, step = nothing)
-    global curtailment_threshold, wind, grid_price
+    global curtailment_threshold, wind, grid_price, history_steps
 
     if !isnothing(env)
         global wind_only
 
         compute_left = env.y[1]
-        step = env.steps + 2
+        step = env.steps
     else
         compute_left = nothing
         wind_only = false
     end
+
+    step += history_steps
 
     compute_power = 0.0
     for i in 1:n_windCORES
@@ -335,7 +321,7 @@ function do_step(env)
     #env.reward = [ -(reward^2)]
     env.reward = [reward]
     
-    y = create_state(; env = env, compute_left = compute_left, step = env.steps + 2)
+    y = create_state(; env = env, compute_left = compute_left, step = env.steps)
 
     return y
 end
@@ -407,7 +393,8 @@ function initialize_setup(;use_random_init = false)
                 target_kl = target_kl,
                 start_logσ = start_logσ,
                 tanh_end = tanh_end,
-                clip_range = clip_range)
+                clip_range = clip_range,
+                betas = betas)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -484,7 +471,7 @@ function train_wind_only(;num_steps = 10_000, loops = 10)
     end
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 4, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 0)
     global wind_only
     wind_only = false
     
@@ -671,7 +658,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
-            render_run()
+            render_run(; show_σ = true)
         end
 
 
@@ -719,7 +706,8 @@ end
 
 
 
-function render_run(use_best = false; plot_optimal = false, steps = 6000, show_training_episode = true)
+function render_run(use_best = false; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false)
+    global history_steps
 
     if show_training_episode
         training_episode = length(hook.rewards)
@@ -746,12 +734,13 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000, show_t
 
     #w = Window()
 
-    xx = collect(0:(1/12):23+(11/12))
+    xx = collect(dt/60:dt/60:te/60)
 
-    results = Dict("rewards" => [], "loadleft" => [])
+    global results = Dict("rewards" => [], "loadleft" => [])
 
-    for k in 1:n_turbines
+    for k in 1:n_windCORES
         results["hpc$k"] = []
+        results["σ$k"] = []
     end
 
     global currentDF = DataFrame()
@@ -760,14 +749,17 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000, show_t
     generate_random_init()
 
     while !env.done
-        action = prob(agent.policy, env).μ
+        prob_temp = prob(agent.policy, env)
+        action = prob_temp.μ
+        σ = prob_temp.σ
 
-        #action = env.y[6] < 0.27 ? [-1.0] : [1.0]
+        #action = agent(env)
 
         env(action)
 
         for k in 1:n_windCORES
             push!(results["hpc$k"], env.p[k])
+            push!(results["σ$k"], σ[k])
         end
         push!(results["rewards"], env.reward[1])
         push!(results["loadleft"], env.y[1])
@@ -799,7 +791,7 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000, show_t
                         color="black"
                     ),
                     showlegend = true,
-                    legend=attr(x=0.5, y=1.1, orientation="h", xanchor="center"),
+                    legend=attr(x=0.5, y=-0.1, orientation="h", xanchor="center"),
                     xaxis = attr(gridcolor = "#E0E0E0FF",
                                 linecolor = "#888888"),
                     yaxis = attr(gridcolor = "#E0E0E0FF",
@@ -819,9 +811,18 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000, show_t
 
     
 
-    to_plot = [scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"),
-                scatter(x=xx, y=results["loadleft"], name="Load Left"),
-                scatter(x=xx, y=grid_price, name="Grid Price")]
+    to_plot = AbstractTrace[]
+    
+    if show_σ
+        for k in 1:n_windCORES
+            push!(to_plot, scatter(x=xx, y=results["σ$k"], name="σ$k", yaxis = "y2"))
+        end
+    else
+        push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
+    end
+
+    push!(to_plot, scatter(x=xx, y=results["loadleft"], name="Load Left"))
+    push!(to_plot, scatter(x=xx, y=grid_price[history_steps:end], name="Grid Price"))
 
 
     for k in 1:n_windCORES
@@ -830,7 +831,7 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000, show_t
 
 
     for k in 1:n_turbines
-        push!(to_plot, scatter(x=xx, y=wind[k], name="Wind Power $k"))
+        push!(to_plot, scatter(x=xx, y=wind[k][history_steps:end], name="Wind Power $k"))
     end
     
 
@@ -851,7 +852,7 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000, show_t
         println("--------------------------------------------")
     end
 
-    p = plot(Vector{AbstractTrace}(to_plot), layout)
+    p = plot(Vector(to_plot), layout)
     display(p)
 
 end
@@ -897,7 +898,7 @@ function evaluate(actions; collect_rewards = false)
 
     for t in 1:Int(te/dt)
 
-        reward, _ = calculate_day(actions[:,t], nothing, t+1)
+        reward, _ = calculate_day(actions[:,t], nothing, t-1)
 
         reward_sum += reward
 
