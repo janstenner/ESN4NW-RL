@@ -13,6 +13,7 @@ using DataFrames
 using Statistics
 using JuMP
 using Ipopt
+using Optimisers
 #using Blink
 
 
@@ -70,7 +71,7 @@ history_steps = 5
 function generate_wind()
     global history_steps, te, dt
 
-    wind_steps = Int(te/dt) + history_steps - 1
+    wind_steps = Int(te/dt) + history_steps
 
     wind_constant_day = rand()
     deviation = 1/5
@@ -101,7 +102,7 @@ end
 function generate_grid_price()
     global history_steps, te, dt
 
-    grid_price_steps = Int(te/dt) + history_steps -1
+    grid_price_steps = Int(te/dt) + history_steps
 
     factor = 1.0;
     factor = 0.6;
@@ -114,7 +115,7 @@ function generate_grid_price()
 end
 
 function create_state(; env = nothing, compute_left = 1.0, step = 0)
-    global wind, grid_price, curtailment_threshold, history_steps
+    global wind, grid_price, curtailment_threshold, history_steps, dt
 
 
     if isnothing(env)
@@ -126,10 +127,16 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
 
         time = 0.0
 
+        last_actions = [0.0 for i in 1:n_windCORES]
+
     else
         y = [compute_left]
 
-        time = env.time / env.te
+        step = env.steps + 1
+
+        time = (env.time + dt) / env.te
+
+        last_actions = env.p
     end
 
 
@@ -151,6 +158,8 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
 
     push!(y, time)
 
+    append!(y, last_actions)
+
 
     Float32.(y)
 end
@@ -164,8 +173,8 @@ sim_space = Space(fill(0..1, (state_dim)))
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 4.0
-nna_scale_critic = 2.5
+nna_scale = 1.5
+nna_scale_critic = 1.5
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -175,23 +184,23 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.997f0
+y = 0.99f0
 p = 0.95f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 400
+update_freq = 300
 
 
-learning_rate = 1e-5
-n_epochs = 3
-n_microbatches = 20
+learning_rate = 1e-4
+n_epochs = 2
+n_microbatches = 10
 logσ_is_network = true
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1
-clip_grad = 0.5
-target_kl = 10.1
+clip_grad = 1.0
+target_kl = 1.0
 clip1 = false
 start_logσ = -0.5
 tanh_end = false
@@ -291,6 +300,9 @@ function calculate_day(action, env, step = nothing)
             power_for_free += temp_free_power
         end
 
+        #special_reward = max(0.1 - abs(power_for_free - compute_power_used), 0)
+        special_reward = 0
+
         compute_power_used -= power_for_free
         #compute_power_used = max(0.0, compute_power_used)
         compute_power_used = softplus_shifted(compute_power_used)
@@ -300,7 +312,7 @@ function calculate_day(action, env, step = nothing)
         
         reward1 = compute_power_used * grid_price[step-1]
 
-        reward = - reward1
+        reward = - reward1 + special_reward * 0.1
 
         if !isnothing(env) 
             if (env.time + env.dt) >= env.te 
@@ -321,7 +333,7 @@ function do_step(env)
     #env.reward = [ -(reward^2)]
     env.reward = [reward]
     
-    y = create_state(; env = env, compute_left = compute_left, step = env.steps)
+    y = create_state(; env = env, compute_left = compute_left, step = env.steps + 1)
 
     return y
 end
@@ -349,9 +361,9 @@ function prepare_action(action0 = nothing, t0 = nothing; env = nothing)
         action = env.action
     end
 
-    clamp!(action, 0.0, 1.0)
+    action = (action .+1) .*0.5
 
-    #action = (action .+1) .*0.5
+    clamp!(action, 0.0, 1.0)
 
     return action
 end
@@ -371,7 +383,43 @@ function initialize_setup(;use_random_init = false)
                 max_value = 1.0,
                 check_max_value = "nothing")
 
-        global agent = create_agent_ppo(action_space = actionspace,
+
+        
+        dim = 10
+
+        logσ = Chain(
+            Dense(state_dim, dim, relu, bias = false),
+            Dense(dim, dim, relu, bias = false),
+            Dense(dim, 1, identity, bias = false)
+        )
+
+        logσ.layers[1].weight[:] .*= 0.2
+        logσ.layers[2].weight[:] .*= 0.2
+        logσ.layers[2].weight[:] = -(abs.(logσ.layers[2].weight[:]))
+
+        approximator = ActorCritic(
+            actor = GaussianNetwork(
+                μ = Chain(
+                    Dense(state_dim, dim, fun),
+                    Dense(dim, dim, fun),
+                    Dense(dim, 1)
+                ),
+                logσ = [-0.5],
+                logσ_is_network = false,
+                max_σ = max_σ,
+            ),
+            critic = Chain(
+                Dense(state_dim, dim, fun),
+                Dense(dim, dim, fun),
+                Dense(dim, 1)
+            ),
+            optimizer_actor = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(learning_rate, betas)),
+            optimizer_critic = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(learning_rate, betas)),
+        )
+
+        global agent = create_agent_ppo(
+                approximator = approximator,
+                action_space = actionspace,
                 state_space = env.state_space,
                 use_gpu = use_gpu, 
                 rng = rng,
@@ -496,9 +544,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
     
 
     for j = 1:outer_loops
-        
-        println("")
-        println("Starting optimized episodes learning...")
+
 
         for i in 1:optimized_episodes
 
