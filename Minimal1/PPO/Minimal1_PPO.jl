@@ -127,8 +127,6 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
 
         time = 0.0
 
-        last_actions = [0.0 for i in 1:n_windCORES]
-
     else
         y = [compute_left]
 
@@ -136,7 +134,6 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
 
         time = (env.time + dt) / env.te
 
-        last_actions = env.p
     end
 
 
@@ -157,8 +154,6 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
     end
 
     push!(y, time)
-
-    append!(y, last_actions)
 
 
     Float32.(y)
