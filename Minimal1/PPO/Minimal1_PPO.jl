@@ -188,10 +188,10 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 300
 
 
-learning_rate = 1e-4
+learning_rate = 1e-5
 n_epochs = 2
 n_microbatches = 10
-logσ_is_network = true
+logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1
 clip_grad = 1.0
@@ -202,6 +202,7 @@ tanh_end = false
 clip_range = 0.2f0
 
 betas = (0.9, 0.99)
+noise = nothing#"perlin"
 
 
 
@@ -437,7 +438,8 @@ function initialize_setup(;use_random_init = false)
                 start_logσ = start_logσ,
                 tanh_end = tanh_end,
                 clip_range = clip_range,
-                betas = betas)
+                betas = betas,
+                noise = noise)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -699,7 +701,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
-            render_run(; show_σ = true)
+            render_run(; show_σ = true, exploration = true)
         end
 
 
@@ -747,7 +749,7 @@ end
 
 
 
-function render_run(use_best = false; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false)
     global history_steps
 
     if show_training_episode
@@ -790,9 +792,16 @@ function render_run(use_best = false; plot_optimal = false, steps = 6000, show_t
     generate_random_init()
 
     while !env.done
-        prob_temp = prob(agent.policy, env)
-        action = prob_temp.μ
-        σ = prob_temp.σ
+
+        if exploration
+            action = agent(env)
+            σ = agent.policy.last_sigma
+        else
+            prob_temp = prob(agent.policy, env)
+            action = prob_temp.μ
+            σ = prob_temp.σ
+        end
+        
 
         #action = agent(env)
 
