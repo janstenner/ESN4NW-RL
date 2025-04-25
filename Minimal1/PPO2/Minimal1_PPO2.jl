@@ -2,7 +2,6 @@ using LinearAlgebra
 using IntervalSets
 using StableRNGs
 using SparseArrays
-using Conda
 using FFTW
 using PlotlyJS
 using FileIO, JLD2
@@ -185,12 +184,12 @@ p = 0.99f0
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 300
+update_freq = 800
 
 
 learning_rate = 4e-5
-n_epochs = 2
-n_microbatches = 60
+n_epochs = 5
+n_microbatches = 40
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1
@@ -204,7 +203,7 @@ clip_range = 0.2f0
 betas = (0.9, 0.99)
 noise = nothing#"perlin"
 normalize_advantage = false
-fear_factor = 0.003
+fear_factor = 0.007
 
 
 wind_only = false
