@@ -16,7 +16,7 @@ using Optimisers
 #using Blink
 
 
-dim = 100
+dim = 20
 batch_size = 5
 fun = gelu
 
@@ -28,9 +28,9 @@ a = Chain(
 )
 
 # Use a higher learning rate to find more complex patterns
-opt_state = Flux.setup(Optimisers.Adam(1e-2), a)
+opt_state = Flux.setup(Optimisers.Adam(7e-3), a)
 
-training_set_size = 30
+training_set_size = 70
 
 input = randn(Float32, 2, training_set_size)
 output = randn(Float32, 1, training_set_size)

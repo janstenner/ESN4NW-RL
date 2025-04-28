@@ -187,12 +187,12 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 800
 
 
-learning_rate = 4e-5
+learning_rate = 1e-6
 n_epochs = 5
 n_microbatches = 40
-logσ_is_network = false
+logσ_is_network = true
 max_σ = 1.0f0
-entropy_loss_weight = 0#.1
+entropy_loss_weight = 0.06
 clip_grad = 1.0
 target_kl = Inf
 clip1 = false
@@ -200,10 +200,10 @@ start_logσ = -0.5
 tanh_end = false
 clip_range = 0.2f0
 
-betas = (0.9, 0.99)
+betas = (0.9, 0.9)
 noise = nothing#"perlin"
 normalize_advantage = false
-fear_factor = 0.007
+fear_factor = 0.5
 
 
 wind_only = false
