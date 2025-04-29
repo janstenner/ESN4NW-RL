@@ -189,10 +189,10 @@ update_freq = 800
 
 learning_rate = 1e-4
 n_epochs = 5
-n_microbatches = 40
+n_microbatches = 80
 logσ_is_network = true
 max_σ = 1.0f0
-entropy_loss_weight = 0.06
+entropy_loss_weight = 0.000006
 clip_grad = 1.0
 target_kl = Inf
 clip1 = false
@@ -200,10 +200,10 @@ start_logσ = -0.5
 tanh_end = false
 clip_range = 0.2f0
 
-betas = (0.995, 0.995)
+betas = (0.95, 0.95)
 noise = nothing#"perlin"
 normalize_advantage = false
-fear_factor = 0.5
+fear_factor = 10.5
 
 
 wind_only = false
@@ -381,7 +381,7 @@ function initialize_setup(;use_random_init = false)
 
 
         
-        dim = 20
+        dim = 10
 
         logσ = Chain(
             Dense(state_dim, dim, relu, bias = false),
@@ -399,7 +399,6 @@ function initialize_setup(;use_random_init = false)
                 μ = Chain(
                     Dense(state_dim, dim, fun),
                     Dense(dim, dim, fun),
-                    Dense(dim, dim, fun),
                     Dense(dim, 1)
                 ),
                 logσ = logσ,
@@ -409,11 +408,10 @@ function initialize_setup(;use_random_init = false)
             critic = Chain(
                 Dense(state_dim, dim, fun),
                 Dense(dim, dim, fun),
-                Dense(dim, dim, fun),
                 Dense(dim, 1)
             ),
-            optimizer_actor = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-5, betas)),
-            optimizer_sigma = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-6, betas)),
+            optimizer_actor = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-3, betas)),
+            optimizer_sigma = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-3, betas)),
             optimizer_critic = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-5, betas)),
         )
 
@@ -522,7 +520,7 @@ function train_wind_only(;num_steps = 10_000, loops = 10)
     end
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 4, optimized_episodes  = 0, outer_loops = 10, steps = 2000, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 0, outer_loops = 10, steps = 2000, only_wind_steps = 0)
     global wind_only
     wind_only = false
     
