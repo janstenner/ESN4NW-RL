@@ -203,7 +203,7 @@ clip_range = 0.2f0
 betas = (0.95, 0.95)
 noise = nothing#"perlin"
 normalize_advantage = false
-fear_factor = 10.5
+fear_factor = 0.005
 
 
 wind_only = false
