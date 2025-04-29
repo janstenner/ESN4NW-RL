@@ -187,7 +187,7 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 800
 
 
-learning_rate = 1e-6
+learning_rate = 1e-4
 n_epochs = 5
 n_microbatches = 40
 logσ_is_network = true
@@ -200,7 +200,7 @@ start_logσ = -0.5
 tanh_end = false
 clip_range = 0.2f0
 
-betas = (0.9, 0.9)
+betas = (0.995, 0.995)
 noise = nothing#"perlin"
 normalize_advantage = false
 fear_factor = 0.5
@@ -394,10 +394,11 @@ function initialize_setup(;use_random_init = false)
         logσ.layers[3].weight[:] .*= 0.8
         logσ.layers[3].weight[:] = -(abs.(logσ.layers[3].weight[:]))
 
-        approximator = ActorCritic(
+        approximator = ActorCritic2(
             actor = GaussianNetwork(
                 μ = Chain(
                     Dense(state_dim, dim, fun),
+                    Dense(dim, dim, fun),
                     Dense(dim, dim, fun),
                     Dense(dim, 1)
                 ),
@@ -408,10 +409,12 @@ function initialize_setup(;use_random_init = false)
             critic = Chain(
                 Dense(state_dim, dim, fun),
                 Dense(dim, dim, fun),
+                Dense(dim, dim, fun),
                 Dense(dim, 1)
             ),
-            optimizer_actor = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(learning_rate, betas)),
-            optimizer_critic = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(learning_rate, betas)),
+            optimizer_actor = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-5, betas)),
+            optimizer_sigma = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-6, betas)),
+            optimizer_critic = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-5, betas)),
         )
 
         global agent = create_agent_ppo2(
@@ -519,7 +522,7 @@ function train_wind_only(;num_steps = 10_000, loops = 10)
     end
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 4, optimized_episodes  = 0, outer_loops = 10, steps = 2000, only_wind_steps = 0)
     global wind_only
     wind_only = false
     
@@ -704,9 +707,12 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
-            render_run(; show_σ = true, exploration = false)
+            
         end
 
+        p1 = render_run(; show_σ = true, exploration = false, return_plot = true)
+        p2 = plot_critic(; return_plot = true)
+        display([p1 p2])
 
     end
 
@@ -752,7 +758,7 @@ end
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false)
     global history_steps
 
     if show_training_episode
@@ -906,8 +912,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     end
 
     p = plot(Vector(to_plot), layout)
-    display(p)
 
+    if return_plot
+        return p
+    else
+        display(p)
+    end
 end
 
 # t1 = scatter(y=rewards1)
@@ -979,4 +989,49 @@ function plot_rewards(smoothing = 30)
 
     p = plot(to_plot)
     display(p)
+end
+
+
+function get_state(x, y)
+    st = Float32[0.8; 0.0; 0.0; 0.0; 0.0; 0.0; 0.4; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.2;;]
+
+    grid_base = Float32[0.05310250000000005, 0.06105506000000005, 0.06905967000000002, 0.07711570000000001, 0.08522229999999997]
+    wind_base = Float32[0.05310250000000005, 0.06105506000000005, 0.06905967000000002, 0.07711570000000001, 0.08522229999999997]
+
+    st[2:6] .= grid_base .+ x * 0.9
+    st[8:12] .= wind_base .+ y * 0.9
+
+    st[13] = max(0.0, st[8] - curtailment_threshold)
+
+    st
+end
+
+function plot_critic(; return_plot = false)
+    xx = collect(0:0.025:1)
+    yy = xx
+    
+    critic_values = zeros(Float32, length(xx), length(yy))
+
+    for (i, _) in enumerate(xx), (j, _) in enumerate(yy)
+        st = get_state(i, j)
+
+        critic_value = agent.policy.approximator.critic(st)[1]
+
+        critic_values[i, j] = critic_value
+    end
+    
+
+    p = plot(surface(x=xx, y=yy, z=critic_values), Layout(
+        scene = attr(
+            xaxis_title="grid price",
+            yaxis_title="wind power",
+            zaxis_title="Critic Value"
+        )
+    ))
+
+    if return_plot
+        return p
+    else
+        display(p)
+    end
 end
