@@ -179,7 +179,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.999f0
-p = 0.99f0
+p = 0.995f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
@@ -709,8 +709,9 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
         end
 
         p1 = render_run(; show_σ = true, exploration = false, return_plot = true)
-        p2 = plot_critic(; return_plot = true)
-        display([p1 p2])
+        #p2 = plot_critic(; return_plot = true)
+        #display([p1 p2])
+        display(p1)
 
     end
 

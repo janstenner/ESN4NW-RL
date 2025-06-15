@@ -168,10 +168,10 @@ sim_space = Space(fill(0..1, (state_dim)))
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 1.5
-nna_scale_critic = 1.5
-drop_middle_layer = false
-drop_middle_layer_critic = false
+nna_scale = 2.5
+nna_scale_critic = 2.0
+drop_middle_layer = true
+drop_middle_layer_critic = true
 fun = gelu
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
@@ -179,8 +179,8 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.99f0
-p = 0.95f0
+y = 0.9997f0
+p = 0.9991f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
@@ -188,18 +188,18 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 300
 
 
-learning_rate = 1e-5
-n_epochs = 2
+learning_rate = 5e-4
+n_epochs = 8
 n_microbatches = 10
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1
-clip_grad = 1.0
-target_kl = 1.0
+clip_grad = 0.5
+target_kl = 0.2
 clip1 = false
 start_logσ = -0.5
 tanh_end = false
-clip_range = 0.2f0
+clip_range = 0.05f0
 
 betas = (0.9, 0.99)
 noise = nothing#"perlin"
@@ -414,7 +414,7 @@ function initialize_setup(;use_random_init = false)
         )
 
         global agent = create_agent_ppo(
-                approximator = approximator,
+               # approximator = approximator,
                 action_space = actionspace,
                 state_space = env.state_space,
                 use_gpu = use_gpu, 
@@ -516,7 +516,7 @@ function train_wind_only(;num_steps = 10_000, loops = 10)
     end
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 4, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 40, optimized_episodes  = 0, outer_loops = 40, steps = 2000, only_wind_steps = 0)
     global wind_only
     wind_only = false
     
@@ -701,9 +701,11 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
-            render_run(; show_σ = true, exploration = true)
+            
         end
 
+
+        render_run(; show_σ = true, exploration = true)
 
     end
 
