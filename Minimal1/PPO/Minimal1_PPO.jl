@@ -168,10 +168,10 @@ sim_space = Space(fill(0..1, (state_dim)))
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 2.5
-nna_scale_critic = 2.0
-drop_middle_layer = true
-drop_middle_layer_critic = true
+nna_scale = 1.6
+nna_scale_critic = 0.8
+drop_middle_layer = false
+drop_middle_layer_critic = false
 fun = gelu
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
@@ -185,21 +185,21 @@ p = 0.9991f0
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 300
+update_freq = 300000
 
 
-learning_rate = 5e-4
-n_epochs = 8
-n_microbatches = 10
+learning_rate = 1e-4
+n_epochs = 5
+n_microbatches = 100
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1
 clip_grad = 0.5
-target_kl = 0.2
+target_kl = 0.02
 clip1 = false
 start_logσ = -0.5
 tanh_end = false
-clip_range = 0.05f0
+clip_range = 0.2f0
 
 betas = (0.9, 0.99)
 noise = nothing#"perlin"
@@ -381,7 +381,7 @@ function initialize_setup(;use_random_init = false)
 
 
         
-        dim = 10
+        dim = 15
 
         logσ = Chain(
             Dense(state_dim, dim, relu, bias = false),
@@ -396,25 +396,27 @@ function initialize_setup(;use_random_init = false)
         approximator = ActorCritic(
             actor = GaussianNetwork(
                 μ = Chain(
-                    Dense(state_dim, dim, fun),
-                    Dense(dim, dim, fun),
-                    Dense(dim, 1)
+                    Dense(state_dim, 20, fun),
+                    Dense(20, 12, fun),
+                    Dense(12, 6, fun),
+                    Dense(6, 1)
                 ),
                 logσ = [-0.5],
                 logσ_is_network = false,
                 max_σ = max_σ,
             ),
             critic = Chain(
-                Dense(state_dim, dim, fun),
-                Dense(dim, dim, fun),
-                Dense(dim, 1)
+                Dense(state_dim, 20, fun),
+                Dense(20, 12, fun),
+                Dense(12, 6, fun),
+                Dense(6, 1)
             ),
             optimizer_actor = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(learning_rate, betas)),
             optimizer_critic = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(learning_rate, betas)),
         )
 
         global agent = create_agent_ppo(
-               # approximator = approximator,
+                # approximator = approximator,
                 action_space = actionspace,
                 state_space = env.state_space,
                 use_gpu = use_gpu, 
@@ -516,7 +518,7 @@ function train_wind_only(;num_steps = 10_000, loops = 10)
     end
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 40, optimized_episodes  = 0, outer_loops = 40, steps = 2000, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimized_episodes  = 0, outer_loops = 360, steps = 2000, only_wind_steps = 0)
     global wind_only
     wind_only = false
     
