@@ -185,19 +185,19 @@ p = 0.9991f0
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 300000
+update_freq = 30_000
 
 
-learning_rate = 1e-4
+learning_rate = 1e-3
 n_epochs = 5
 n_microbatches = 100
-logσ_is_network = true
+logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1
 clip_grad = 0.5
-target_kl = 0.02
+target_kl = 5.0
 clip1 = false
-start_logσ = -0.5
+start_logσ = -0.9
 tanh_end = false
 clip_range = 0.2f0
 
@@ -518,7 +518,7 @@ function train_wind_only(;num_steps = 10_000, loops = 10)
     end
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimized_episodes  = 0, outer_loops = 360, steps = 2000, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 30, outer_loops = 360, steps = 2000, only_wind_steps = 0)
     global wind_only
     wind_only = false
     
@@ -555,9 +555,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
                 reset!(env)
                 agent(PRE_EPISODE_STAGE, env)
 
-                env.y0 = generate_random_init()
-                env.y = deepcopy(env.y0)
-                env.state = env.featurize(; env = env)
+                generate_random_init()
 
                 # generate optimal actions
                 optimal_actions = optimize_day(steps; verbose = false)
@@ -567,11 +565,21 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
                     # action = agent(env)
 
                     if n <= size(optimal_actions)[2]
-                        action = optimal_actions[:,n]
+                        # hcat for transforming vectors to matrices
+                        action = hcat(optimal_actions[:,n])
                     else
                         # just in case y[1] is not exactly 0.0 due to numerical errors
-                        action = [ 0.001 ]
+                        action = 0.001 .* ones(action_dim,1)
                     end
+
+                    # update policy.last_action_log_prob
+                    dist = prob(agent.policy, env)
+                    log_p = vec(sum(normlogpdf(dist.μ, dist.σ, action), dims=1))
+                    # agent.policy.last_action_log_prob = log_p
+
+                    # fake log_p
+                    agent.policy.last_action_log_prob = log_p .+ 0.8
+
 
                     agent(PRE_ACT_STAGE, env, action)
 
@@ -579,11 +587,6 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
                     agent(POST_ACT_STAGE, env)
 
-                    if visuals
-                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
-
-                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
-                    end
 
                     frame += 1
                     n += 1
@@ -775,7 +778,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     # agent.policy.update_after = 100000
 
 
-    agent.policy.update_step = 0
+    # agent.policy.update_step = 0
     global rewards = Float64[]
     reward_sum = 0.0
 
@@ -789,8 +792,6 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         results["hpc$k"] = []
         results["σ$k"] = []
     end
-
-    global currentDF = DataFrame()
 
     reset!(env)
     generate_random_init()
@@ -927,11 +928,11 @@ function optimize_day(steps = 3000; verbose = true)
 
     set_optimizer_attribute(model, "max_iter", steps)
 
-    @variable(model, 0 <= x[1:n_windCORES, 1:Int(te/dt)] <= 1)
+    @variable(model, -1 <= x[1:n_windCORES, 1:Int(te/dt)] <= 1)
 
-    @constraint(model, sum(x) == 100.0)
+    @constraint(model, sum((x .+1) .*0.5) == 100.0)
 
-    @objective(model, Max, evaluate(x))
+    @objective(model, Max, evaluate((x .+1) .*0.5))
 
     optimize!(model)
 
