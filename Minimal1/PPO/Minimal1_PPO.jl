@@ -114,8 +114,11 @@ function generate_grid_price()
     return gp
 end
 
+include_history_steps = 1
+include_gradients = 2
+
 function create_state(; env = nothing, compute_left = 1.0, step = 0)
-    global wind, grid_price, curtailment_threshold, history_steps, dt
+    global wind, grid_price, curtailment_threshold, history_steps, dt, include_history_steps, include_gradients
 
 
     if isnothing(env)
@@ -137,8 +140,17 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
     end
 
 
-    for i in history_steps:-1:1
+    for i in history_steps:-1:(1 + (history_steps - include_history_steps))
         push!(y, grid_price[i+step])
+    end
+
+    if include_gradients > 0
+        g1 = (grid_price[history_steps+step] - grid_price[history_steps+step-1])/dt
+        push!(y, g1)
+        if include_gradients > 1
+            g2 = (grid_price[history_steps+step] - 2*grid_price[history_steps+step-1] + grid_price[history_steps+step-2])/(dt^2)
+            push!(y, g2)
+        end
     end
 
 
@@ -146,8 +158,17 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
 
     for i in 1:n_turbines
 
-        for j in history_steps:-1:1
+        for j in history_steps:-1:(1 + (history_steps - include_history_steps))
             push!(y, wind[i][j+step])
+        end
+
+        if include_gradients > 0
+            g1 = (wind[i][history_steps+step] - wind[i][history_steps+step-1])/dt
+            push!(y, g1)
+            if include_gradients > 1
+                g2 = (wind[i][history_steps+step] - 2*wind[i][history_steps+step-1] + wind[i][history_steps+step-2])/(dt^2)
+                push!(y, g2)
+            end
         end
 
         push!(y, max(0.0, wind[i][history_steps+step] - curtailment_threshold))
@@ -561,6 +582,13 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
                 optimal_actions = optimize_day(steps; verbose = false)
                 n = 1
 
+                global results = Dict("rewards" => [], "loadleft" => [])
+
+                for k in 1:n_windCORES
+                    results["hpc$k"] = []
+                end
+
+
                 while !is_terminated(env) # one episode
                     # action = agent(env)
 
@@ -587,6 +615,12 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
                     agent(POST_ACT_STAGE, env)
 
+                    for k in 1:n_windCORES
+                        push!(results["hpc$k"], env.p[k])
+                    end
+                    push!(results["rewards"], env.reward[1])
+                    push!(results["loadleft"], env.y[1])
+
 
                     frame += 1
                     n += 1
@@ -595,6 +629,51 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
                 if is_terminated(env)
                     agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
                 end
+
+                # layout = Layout(
+                #     plot_bgcolor = "white",
+                #     font=attr(
+                #         family="Arial",
+                #         size=16,
+                #         color="black"
+                #     ),
+                #     showlegend = true,
+                #     legend=attr(x=0.5, y=-0.1, orientation="h", xanchor="center"),
+                #     xaxis = attr(gridcolor = "#E0E0E0FF",
+                #                 linecolor = "#888888"),
+                #     yaxis = attr(gridcolor = "#E0E0E0FF",
+                #                 linecolor = "#888888",
+                #                 range=[0,1]),
+                #     yaxis2 = attr(
+                #         overlaying="y",
+                #         side="right",
+                #         titlefont_color="orange",
+                #         #range=[-1, 1]
+                #     ),
+                # )
+
+                # to_plot = AbstractTrace[]
+    
+                # xx = collect(dt/60:dt/60:te/60)
+                
+                # push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
+
+                # push!(to_plot, scatter(x=xx, y=results["loadleft"], name="Load Left"))
+                # push!(to_plot, scatter(x=xx, y=grid_price[history_steps:end], name="Grid Price"))
+
+
+                # for k in 1:n_windCORES
+                #     push!(to_plot, scatter(x=xx, y=results["hpc$k"], name="WindCORE utilization $k"))
+                # end
+
+
+                # for k in 1:n_turbines
+                #     push!(to_plot, scatter(x=xx, y=wind[k][history_steps:end], name="Wind Power $k"))
+                # end
+
+                # p = plot(Vector(to_plot), layout)
+                # display(p)
+
 
                 is_stop = true
             end
