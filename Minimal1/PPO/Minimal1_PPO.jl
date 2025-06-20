@@ -206,7 +206,7 @@ p = 0.9991f0
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 30_000
+update_freq = 600_000
 
 
 learning_rate = 1e-3
@@ -329,7 +329,7 @@ function calculate_day(action, env, step = nothing)
         
         reward1 = compute_power_used * grid_price[step-1]
 
-        reward = - reward1 + special_reward * 0.1
+        reward = - reward1 #+ special_reward * 0.1
 
         if !isnothing(env) 
             if (env.time + env.dt) >= env.te 
@@ -539,7 +539,7 @@ function train_wind_only(;num_steps = 10_000, loops = 10)
     end
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 30, outer_loops = 360, steps = 2000, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimized_episodes  = 0, outer_loops = 360, steps = 2000, only_wind_steps = 0)
     global wind_only
     wind_only = false
     
@@ -788,8 +788,10 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             
         end
 
-
-        render_run(; show_σ = true, exploration = true)
+        p1 = render_run(; show_σ = true, exploration = true, return_plot = true)
+        #p2 = plot_critic(; return_plot = true)
+        #display([p1 p2])
+        display(p1)
 
     end
 
@@ -835,7 +837,7 @@ end
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false)
     global history_steps
 
     if show_training_episode
@@ -987,8 +989,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     end
 
     p = plot(Vector(to_plot), layout)
-    display(p)
 
+    if return_plot
+        return p
+    else
+        display(p)
+    end
 end
 
 # t1 = scatter(y=rewards1)

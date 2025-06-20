@@ -113,8 +113,11 @@ function generate_grid_price()
     return gp
 end
 
+include_history_steps = 1
+include_gradients = 2
+
 function create_state(; env = nothing, compute_left = 1.0, step = 0)
-    global wind, grid_price, curtailment_threshold, history_steps, dt
+    global wind, grid_price, curtailment_threshold, history_steps, dt, include_history_steps, include_gradients
 
 
     if isnothing(env)
@@ -136,8 +139,17 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
     end
 
 
-    for i in history_steps:-1:1
+    for i in history_steps:-1:(1 + (history_steps - include_history_steps))
         push!(y, grid_price[i+step])
+    end
+
+    if include_gradients > 0
+        g1 = (grid_price[history_steps+step] - grid_price[history_steps+step-1])/dt
+        push!(y, g1)
+        if include_gradients > 1
+            g2 = (grid_price[history_steps+step] - 2*grid_price[history_steps+step-1] + grid_price[history_steps+step-2])/(dt^2)
+            push!(y, g2)
+        end
     end
 
 
@@ -145,8 +157,17 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
 
     for i in 1:n_turbines
 
-        for j in history_steps:-1:1
+        for j in history_steps:-1:(1 + (history_steps - include_history_steps))
             push!(y, wind[i][j+step])
+        end
+
+        if include_gradients > 0
+            g1 = (wind[i][history_steps+step] - wind[i][history_steps+step-1])/dt
+            push!(y, g1)
+            if include_gradients > 1
+                g2 = (wind[i][history_steps+step] - 2*wind[i][history_steps+step-1] + wind[i][history_steps+step-2])/(dt^2)
+                push!(y, g2)
+            end
         end
 
         push!(y, max(0.0, wind[i][history_steps+step] - curtailment_threshold))
@@ -167,8 +188,8 @@ sim_space = Space(fill(0..1, (state_dim)))
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 1.5
-nna_scale_critic = 1.5
+nna_scale = 1.6
+nna_scale_critic = 0.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -178,32 +199,33 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.999f0
-p = 0.995f0
+y = 0.9997f0
+p = 0.9991f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 800
+update_freq = 600_000
 
 
-learning_rate = 1e-4
+learning_rate = 1e-3
 n_epochs = 5
-n_microbatches = 80
-logσ_is_network = true
+n_microbatches = 100
+logσ_is_network = false
 max_σ = 1.0f0
-entropy_loss_weight = 0.000006
+entropy_loss_weight = 0.0#00006
 clip_grad = 1.0
-target_kl = Inf
+target_kl = 5.0
 clip1 = false
-start_logσ = -0.5
+start_logσ = -0.9
 tanh_end = false
 clip_range = 0.2f0
 
-betas = (0.95, 0.95)
+betas = (0.9, 0.99)
 noise = nothing#"perlin"
-normalize_advantage = false
+normalize_advantage = true
 fear_factor = 0.005
+adaptive_weights = false
 
 
 wind_only = false
@@ -308,7 +330,7 @@ function calculate_day(action, env, step = nothing)
         
         reward1 = compute_power_used * grid_price[step-1]
 
-        reward = - reward1 + special_reward * 0.1
+        reward = - reward1 #+ special_reward * 0.1
 
         if !isnothing(env) 
             if (env.time + env.dt) >= env.te 
@@ -416,7 +438,7 @@ function initialize_setup(;use_random_init = false)
         )
 
         global agent = create_agent_ppo2(
-                approximator = approximator,
+                # approximator = approximator,
                 action_space = actionspace,
                 state_space = env.state_space,
                 use_gpu = use_gpu, 
@@ -443,7 +465,8 @@ function initialize_setup(;use_random_init = false)
                 betas = betas,
                 noise = noise,
                 normalize_advantage = normalize_advantage,
-                fear_factor = fear_factor)
+                fear_factor = fear_factor,
+                adaptive_weights = adaptive_weights)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -520,7 +543,7 @@ function train_wind_only(;num_steps = 10_000, loops = 10)
     end
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 0, outer_loops = 10, steps = 2000, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimized_episodes  = 0, outer_loops = 360, steps = 2000, only_wind_steps = 0)
     global wind_only
     wind_only = false
     
@@ -557,23 +580,38 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
                 reset!(env)
                 agent(PRE_EPISODE_STAGE, env)
 
-                env.y0 = generate_random_init()
-                env.y = deepcopy(env.y0)
-                env.state = env.featurize(; env = env)
+                generate_random_init()
 
                 # generate optimal actions
                 optimal_actions = optimize_day(steps; verbose = false)
                 n = 1
 
+                global results = Dict("rewards" => [], "loadleft" => [])
+
+                for k in 1:n_windCORES
+                    results["hpc$k"] = []
+                end
+
+
                 while !is_terminated(env) # one episode
                     # action = agent(env)
 
                     if n <= size(optimal_actions)[2]
-                        action = optimal_actions[:,n]
+                        # hcat for transforming vectors to matrices
+                        action = hcat(optimal_actions[:,n])
                     else
                         # just in case y[1] is not exactly 0.0 due to numerical errors
-                        action = [ 0.001 ]
+                        action = 0.001 .* ones(action_dim,1)
                     end
+
+                    # update policy.last_action_log_prob
+                    dist = prob(agent.policy, env)
+                    log_p = vec(sum(normlogpdf(dist.μ, dist.σ, action), dims=1))
+                    # agent.policy.last_action_log_prob = log_p
+
+                    # fake log_p
+                    agent.policy.last_action_log_prob = log_p .+ 0.8
+
 
                     agent(PRE_ACT_STAGE, env, action)
 
@@ -581,11 +619,12 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
                     agent(POST_ACT_STAGE, env)
 
-                    if visuals
-                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
-
-                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
+                    for k in 1:n_windCORES
+                        push!(results["hpc$k"], env.p[k])
                     end
+                    push!(results["rewards"], env.reward[1])
+                    push!(results["loadleft"], env.y[1])
+
 
                     frame += 1
                     n += 1
@@ -594,6 +633,51 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
                 if is_terminated(env)
                     agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
                 end
+
+                # layout = Layout(
+                #     plot_bgcolor = "white",
+                #     font=attr(
+                #         family="Arial",
+                #         size=16,
+                #         color="black"
+                #     ),
+                #     showlegend = true,
+                #     legend=attr(x=0.5, y=-0.1, orientation="h", xanchor="center"),
+                #     xaxis = attr(gridcolor = "#E0E0E0FF",
+                #                 linecolor = "#888888"),
+                #     yaxis = attr(gridcolor = "#E0E0E0FF",
+                #                 linecolor = "#888888",
+                #                 range=[0,1]),
+                #     yaxis2 = attr(
+                #         overlaying="y",
+                #         side="right",
+                #         titlefont_color="orange",
+                #         #range=[-1, 1]
+                #     ),
+                # )
+
+                # to_plot = AbstractTrace[]
+    
+                # xx = collect(dt/60:dt/60:te/60)
+                
+                # push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
+
+                # push!(to_plot, scatter(x=xx, y=results["loadleft"], name="Load Left"))
+                # push!(to_plot, scatter(x=xx, y=grid_price[history_steps:end], name="Grid Price"))
+
+
+                # for k in 1:n_windCORES
+                #     push!(to_plot, scatter(x=xx, y=results["hpc$k"], name="WindCORE utilization $k"))
+                # end
+
+
+                # for k in 1:n_turbines
+                #     push!(to_plot, scatter(x=xx, y=wind[k][history_steps:end], name="Wind Power $k"))
+                # end
+
+                # p = plot(Vector(to_plot), layout)
+                # display(p)
+
 
                 is_stop = true
             end
@@ -708,7 +792,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             
         end
 
-        p1 = render_run(; show_σ = true, exploration = false, return_plot = true)
+        p1 = render_run(; show_σ = true, exploration = true, return_plot = true)
         #p2 = plot_critic(; return_plot = true)
         #display([p1 p2])
         display(p1)
@@ -779,7 +863,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     # agent.policy.update_after = 100000
 
 
-    agent.policy.update_step = 0
+    # agent.policy.update_step = 0
     global rewards = Float64[]
     reward_sum = 0.0
 
@@ -793,8 +877,6 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         results["hpc$k"] = []
         results["σ$k"] = []
     end
-
-    global currentDF = DataFrame()
 
     reset!(env)
     generate_random_init()
@@ -935,11 +1017,11 @@ function optimize_day(steps = 3000; verbose = true)
 
     set_optimizer_attribute(model, "max_iter", steps)
 
-    @variable(model, 0 <= x[1:n_windCORES, 1:Int(te/dt)] <= 1)
+    @variable(model, -1 <= x[1:n_windCORES, 1:Int(te/dt)] <= 1)
 
-    @constraint(model, sum(x) == 100.0)
+    @constraint(model, sum((x .+1) .*0.5) == 100.0)
 
-    @objective(model, Max, evaluate(x))
+    @objective(model, Max, evaluate((x .+1) .*0.5))
 
     optimize!(model)
 
