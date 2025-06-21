@@ -189,7 +189,7 @@ sim_space = Space(fill(0..1, (state_dim)))
 # agent tuning parameters
 memory_size = 0
 nna_scale = 1.6
-nna_scale_critic = 0.8
+nna_scale_critic = 1.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -205,27 +205,28 @@ p = 0.9991f0
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 600_000
+update_freq = 60_000
 
 
-learning_rate = 1e-3
+learning_rate = 2e-4
 n_epochs = 5
 n_microbatches = 100
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0.0#00006
 clip_grad = 1.0
-target_kl = 5.0
+target_kl = Inf
 clip1 = false
-start_logσ = -0.9
+start_logσ = -0.5
 tanh_end = false
 clip_range = 0.2f0
 
 betas = (0.9, 0.99)
-noise = nothing#"perlin"
-normalize_advantage = true
+noise = "perlin"
+noise_scale = 20
+normalize_advantage = false
 fear_factor = 0.005
-adaptive_weights = false
+adaptive_weights = true
 
 
 wind_only = false
@@ -464,6 +465,7 @@ function initialize_setup(;use_random_init = false)
                 clip_range = clip_range,
                 betas = betas,
                 noise = noise,
+                noise_scale = noise_scale,
                 normalize_advantage = normalize_advantage,
                 fear_factor = fear_factor,
                 adaptive_weights = adaptive_weights)
@@ -792,7 +794,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             
         end
 
-        p1 = render_run(; show_σ = true, exploration = true, return_plot = true)
+        p1 = render_run(; exploration = true, return_plot = true, gae = true)
         #p2 = plot_critic(; return_plot = true)
         #display([p1 p2])
         display(p1)
@@ -841,7 +843,7 @@ end
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false)
     global history_steps
 
     if show_training_episode
@@ -878,6 +880,9 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         results["σ$k"] = []
     end
 
+    values = []
+    next_values = []
+
     reset!(env)
     generate_random_init()
 
@@ -895,7 +900,11 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
         #action = agent(env)
 
+        push!(values, agent.policy.approximator.critic(env.state)[1])
+
         env(action)
+
+        push!(next_values, agent.policy.approximator.critic(env.state)[1])
 
         for k in 1:n_windCORES
             push!(results["hpc$k"], env.p[k])
@@ -922,6 +931,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
     println(reward_sum)
 
+
+    colorscale = [[0, "rgb(255, 0, 0)"], [0.5, "rgb(255, 255, 255)"], [1, "rgb(0, 255, 0)"], ]
 
     layout = Layout(
                     plot_bgcolor = "white",
@@ -957,6 +968,27 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         for k in 1:n_windCORES
             push!(to_plot, scatter(x=xx, y=results["σ$k"], name="σ$k", yaxis = "y2"))
         end
+    elseif gae
+        global y, p
+        advantages = generalized_advantage_estimation(
+            results["rewards"],
+            values,
+            next_values,
+            y,
+            p
+        )
+
+        push!(to_plot, scatter(x=xx, y=advantages, name="Advantage", yaxis = "y2",
+            mode="lines+markers",
+            marker=attr(
+                color=advantages,               # array of numbers
+                cmin = -0.01,
+                cmid = 0.0,
+                cmax = 0.01,
+                colorscale=colorscale,
+                showscale=false
+            ),
+            line=attr(color="grey")))
     else
         push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
     end
@@ -992,12 +1024,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         println("--------------------------------------------")
     end
 
-    p = plot(Vector(to_plot), layout)
+    plott = plot(Vector(to_plot), layout)
 
     if return_plot
-        return p
+        return plott
     else
-        display(p)
+        display(plott)
     end
 end
 

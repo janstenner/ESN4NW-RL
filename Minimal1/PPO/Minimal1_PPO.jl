@@ -788,7 +788,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             
         end
 
-        p1 = render_run(; show_σ = true, exploration = true, return_plot = true)
+        p1 = render_run(; exploration = true, return_plot = true, gae = true)
         #p2 = plot_critic(; return_plot = true)
         #display([p1 p2])
         display(p1)
@@ -837,7 +837,7 @@ end
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false)
     global history_steps
 
     if show_training_episode
@@ -874,6 +874,9 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         results["σ$k"] = []
     end
 
+    values = []
+    next_values = []
+
     reset!(env)
     generate_random_init()
 
@@ -891,7 +894,11 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
         #action = agent(env)
 
+        push!(values, agent.policy.approximator.critic(env.state)[1])
+
         env(action)
+
+        push!(next_values, agent.policy.approximator.critic(env.state)[1])
 
         for k in 1:n_windCORES
             push!(results["hpc$k"], env.p[k])
@@ -918,6 +925,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
     println(reward_sum)
 
+
+    colorscale = [[0, "rgb(255, 0, 0)"], [0.5, "rgb(255, 255, 255)"], [1, "rgb(0, 255, 0)"], ]
 
     layout = Layout(
                     plot_bgcolor = "white",
@@ -953,6 +962,27 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         for k in 1:n_windCORES
             push!(to_plot, scatter(x=xx, y=results["σ$k"], name="σ$k", yaxis = "y2"))
         end
+    elseif gae
+        global y, p
+        advantages = generalized_advantage_estimation(
+            results["rewards"],
+            values,
+            next_values,
+            y,
+            p
+        )
+
+        push!(to_plot, scatter(x=xx, y=advantages, name="Advantage", yaxis = "y2",
+            mode="lines+markers",
+            marker=attr(
+                color=advantages,               # array of numbers
+                cmin = -0.01,
+                cmid = 0.0,
+                cmax = 0.01,
+                colorscale=colorscale,
+                showscale=false
+            ),
+            line=attr(color="grey")))
     else
         push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
     end
@@ -988,12 +1018,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         println("--------------------------------------------")
     end
 
-    p = plot(Vector(to_plot), layout)
+    plott = plot(Vector(to_plot), layout)
 
     if return_plot
-        return p
+        return plott
     else
-        display(p)
+        display(plott)
     end
 end
 
