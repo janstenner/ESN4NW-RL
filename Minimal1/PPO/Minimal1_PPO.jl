@@ -201,15 +201,15 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.9997f0
-p = 0.9991f0
+p = 0.99f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 600_000
+update_freq = 60_000
 
 
-learning_rate = 1e-3
+learning_rate = 3e-4
 n_epochs = 5
 n_microbatches = 100
 logσ_is_network = false
@@ -837,7 +837,7 @@ end
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false, plot_values = false)
     global history_steps
 
     if show_training_episode
@@ -964,7 +964,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         end
     elseif gae
         global y, p
-        advantages = generalized_advantage_estimation(
+        advantages, returns = generalized_advantage_estimation(
             results["rewards"],
             values,
             next_values,
@@ -982,9 +982,14 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
                 colorscale=colorscale,
                 showscale=false
             ),
-            line=attr(color="grey")))
+            line=attr(color = "rgba(200, 200, 200, 0.3)")))
     else
         push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
+    end
+
+    if plot_values
+        push!(to_plot, scatter(x=xx, y=values, name="Critic Value", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=returns, name="Return", yaxis = "y2"))
     end
 
     push!(to_plot, scatter(x=xx, y=results["loadleft"], name="Load Left"))

@@ -189,7 +189,7 @@ sim_space = Space(fill(0..1, (state_dim)))
 # agent tuning parameters
 memory_size = 0
 nna_scale = 1.6
-nna_scale_critic = 1.8
+nna_scale_critic = 0.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -200,12 +200,12 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.9997f0
-p = 0.9991f0
+p = 0.6f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 60_000
+update_freq = 10_000
 
 
 learning_rate = 2e-4
@@ -214,7 +214,7 @@ n_microbatches = 100
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0.0#00006
-clip_grad = 1.0
+clip_grad = 0.8
 target_kl = Inf
 clip1 = false
 start_logσ = -0.5
@@ -224,7 +224,7 @@ clip_range = 0.2f0
 betas = (0.9, 0.99)
 noise = "perlin"
 noise_scale = 20
-normalize_advantage = false
+normalize_advantage = true
 fear_factor = 0.005
 adaptive_weights = true
 
@@ -843,7 +843,7 @@ end
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false, plot_values = false)
     global history_steps
 
     if show_training_episode
@@ -970,7 +970,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         end
     elseif gae
         global y, p
-        advantages = generalized_advantage_estimation(
+        advantages, returns = generalized_advantage_estimation(
             results["rewards"],
             values,
             next_values,
@@ -988,9 +988,14 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
                 colorscale=colorscale,
                 showscale=false
             ),
-            line=attr(color="grey")))
+            line=attr(color = "rgba(200, 200, 200, 0.3)")))
     else
         push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
+    end
+
+    if plot_values
+        push!(to_plot, scatter(x=xx, y=values, name="Critic Value", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=returns, name="Return", yaxis = "y2"))
     end
 
     push!(to_plot, scatter(x=xx, y=results["loadleft"], name="Load Left"))
@@ -1147,4 +1152,85 @@ function plot_critic(; return_plot = false)
     else
         display(p)
     end
+end
+
+
+function plot_trajectory()
+    t = agent.trajectory
+    AC = agent.policy.approximator
+    states = collect(flatten_batch(t[:state]))
+
+    values = AC.critic(states)
+    next_values = collect(flatten_batch(t[:next_values]))
+
+    advantages, returns = generalized_advantage_estimation(
+        t[:reward],
+        values,
+        next_values,
+        y,
+        p;
+        dims=2,
+        terminal=t[:terminal]
+    )
+
+    colorscale = [[0, "rgb(255, 0, 0)"], [0.5, "rgb(255, 255, 255)"], [1, "rgb(0, 255, 0)"], ]
+
+    layout = Layout(
+                    plot_bgcolor = "white",
+                    font=attr(
+                        family="Arial",
+                        size=16,
+                        color="black"
+                    ),
+                    showlegend = true,
+                    legend=attr(x=0.5, y=-0.1, orientation="h", xanchor="center"),
+                    xaxis = attr(gridcolor = "#E0E0E0FF",
+                                linecolor = "#888888"),
+                    yaxis = attr(gridcolor = "#E0E0E0FF",
+                                linecolor = "#888888",
+                                range=[0,1]),
+                    yaxis2 = attr(
+                        overlaying="y",
+                        side="right",
+                        titlefont_color="orange",
+                        #range=[-1, 1]
+                    ),
+                )
+
+    to_plot = AbstractTrace[]
+    
+
+    push!(to_plot, scatter(y=advantages[:], name="Advantage", yaxis = "y2",
+            mode="lines+markers",
+            marker=attr(
+                color=advantages[:],               # array of numbers
+                cmin = -0.01,
+                cmid = 0.0,
+                cmax = 0.01,
+                colorscale=colorscale,
+                showscale=false
+            ),
+            line=attr(color = "rgba(200, 200, 200, 0.3)")))
+    
+    push!(to_plot, scatter(y=t[:reward][:], name="Reward", yaxis = "y2"))
+    
+
+
+    push!(to_plot, scatter(y=values[:], name="Critic Values", yaxis = "y2"))
+    push!(to_plot, scatter(y=next_values[:], name="Next Value", yaxis = "y2"))
+    push!(to_plot, scatter(y=returns[:], name="Return", yaxis = "y2"))
+
+
+    push!(to_plot, scatter(y=states[1,:], name="Load Left"))
+    push!(to_plot, scatter(y=states[2,:], name="Grid Price"))
+
+    push!(to_plot, scatter(y=t[:action][:], name="WindCORE utilization 1"))
+
+    push!(to_plot, scatter(y=states[6,:], name="Wind Power 1"))
+
+    push!(to_plot, scatter(y=Float32.(t[:terminal][:]), name="Terminal"))
+
+    plott = plot(Vector(to_plot), layout)
+
+    display(plott)
 end
