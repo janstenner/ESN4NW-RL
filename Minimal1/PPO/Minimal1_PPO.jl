@@ -216,7 +216,7 @@ logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1
 clip_grad = 0.5
-target_kl = 5.0
+target_kl = Inf#10.0
 clip1 = false
 start_logσ = -0.9
 tanh_end = false
@@ -226,8 +226,19 @@ betas = (0.9, 0.99)
 noise = nothing#"perlin"
 
 
-
+normalize_advantage = true
 wind_only = false
+
+
+
+optimal_episodes = 200
+
+if !isdefined(Main, :optimal_trajectory)
+    optimal_trajectory = nothing
+end
+
+
+
 
 
 function smoothedReLu(x)
@@ -462,7 +473,8 @@ function initialize_setup(;use_random_init = false)
                 tanh_end = tanh_end,
                 clip_range = clip_range,
                 betas = betas,
-                noise = noise)
+                noise = noise,
+                normalize_advantage = normalize_advantage,)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -539,8 +551,81 @@ function train_wind_only(;num_steps = 10_000, loops = 10)
     end
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimized_episodes  = 0, outer_loops = 360, steps = 2000, only_wind_steps = 0)
-    global wind_only
+
+function fill_optimal_trajectory(; steps = 4000)
+    global optimal_trajectory, optimal_episodes, env, action_dim
+
+    if isnothing(optimal_trajectory)
+        n_envs = 1
+        optimal_trajectory = CircularArrayTrajectory(;
+                capacity = Int(te / dt) * optimal_episodes, # fit all episodes
+                state = Float32 => (size(env.state_space)[1], n_envs),
+                action = Float32 => (size(env.action_space)[1], n_envs),
+                action_log_prob = Float32 => (n_envs),
+                reward = Float32 => (n_envs),
+                terminal = Bool => (n_envs,),
+                next_values = Float32 => (1, n_envs),
+        )
+    end
+
+    global optimal_rewards = Float64[]
+
+    for i in 1:optimal_episodes
+
+            # run start
+            println("Optimized Episode $(i)...")
+            reset!(env)
+
+            generate_random_init()
+
+            # generate optimal actions
+            optimal_actions = optimize_day(steps; verbose = false)
+            n = 1
+
+            episode_rewards = Float64[]
+
+            while !is_terminated(env) # one episode
+
+                if n <= size(optimal_actions)[2]
+                    # hcat for transforming vectors to matrices
+                    action = hcat(optimal_actions[:,n])
+                else
+                    # just in case y[1] is not exactly 0.0 due to numerical errors
+                    action = 0.001 .* ones(action_dim,1)
+                end
+
+                # importance sampling according to PPO+D
+                last_action_log_prob = zeros(Float32, action_dim)
+
+
+                push!(
+                    optimal_trajectory;
+                    state=env.state,
+                    action=action,
+                    action_log_prob=last_action_log_prob,
+                )
+
+                env(action)
+
+                r = reward(env)[:]
+
+                push!(episode_rewards, r[1])
+
+                push!(optimal_trajectory[:reward], r)
+                push!(optimal_trajectory[:terminal], is_terminated(env))
+                push!(optimal_trajectory[:next_values], agent.policy.approximator.critic(env.state))
+
+
+                n += 1
+            end # end of an episode
+
+            push!(optimal_rewards, sum(episode_rewards))
+        end
+
+end
+
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimal_trainings  = 0, outer_loops = 360, only_wind_steps = 0)
+    global wind_only, optimal_trajectory
     wind_only = false
     
     rm(dirpath * "/training_frames/", recursive=true, force=true)
@@ -561,122 +646,18 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
     else
         hook.generate_random_init = false
     end
+
+
+    if optimal_trainings > 0 &&  isnothing(optimal_trajectory)
+        fill_optimal_trajectory()
+    end
     
 
     for j = 1:outer_loops
 
 
-        for i in 1:optimized_episodes
-
-            # run start
-            agent(PRE_EXPERIMENT_STAGE, env)
-            is_stop = false
-            while !is_stop
-                println("Optimized Episode $(i)...")
-                reset!(env)
-                agent(PRE_EPISODE_STAGE, env)
-
-                generate_random_init()
-
-                # generate optimal actions
-                optimal_actions = optimize_day(steps; verbose = false)
-                n = 1
-
-                global results = Dict("rewards" => [], "loadleft" => [])
-
-                for k in 1:n_windCORES
-                    results["hpc$k"] = []
-                end
-
-
-                while !is_terminated(env) # one episode
-                    # action = agent(env)
-
-                    if n <= size(optimal_actions)[2]
-                        # hcat for transforming vectors to matrices
-                        action = hcat(optimal_actions[:,n])
-                    else
-                        # just in case y[1] is not exactly 0.0 due to numerical errors
-                        action = 0.001 .* ones(action_dim,1)
-                    end
-
-                    # update policy.last_action_log_prob
-                    dist = prob(agent.policy, env)
-                    log_p = vec(sum(normlogpdf(dist.μ, dist.σ, action), dims=1))
-                    # agent.policy.last_action_log_prob = log_p
-
-                    # fake log_p
-                    agent.policy.last_action_log_prob = log_p .+ 0.8
-
-
-                    agent(PRE_ACT_STAGE, env, action)
-
-                    env(action)
-
-                    agent(POST_ACT_STAGE, env)
-
-                    for k in 1:n_windCORES
-                        push!(results["hpc$k"], env.p[k])
-                    end
-                    push!(results["rewards"], env.reward[1])
-                    push!(results["loadleft"], env.y[1])
-
-
-                    frame += 1
-                    n += 1
-                end # end of an episode
-
-                if is_terminated(env)
-                    agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
-                end
-
-                # layout = Layout(
-                #     plot_bgcolor = "white",
-                #     font=attr(
-                #         family="Arial",
-                #         size=16,
-                #         color="black"
-                #     ),
-                #     showlegend = true,
-                #     legend=attr(x=0.5, y=-0.1, orientation="h", xanchor="center"),
-                #     xaxis = attr(gridcolor = "#E0E0E0FF",
-                #                 linecolor = "#888888"),
-                #     yaxis = attr(gridcolor = "#E0E0E0FF",
-                #                 linecolor = "#888888",
-                #                 range=[0,1]),
-                #     yaxis2 = attr(
-                #         overlaying="y",
-                #         side="right",
-                #         titlefont_color="orange",
-                #         #range=[-1, 1]
-                #     ),
-                # )
-
-                # to_plot = AbstractTrace[]
-    
-                # xx = collect(dt/60:dt/60:te/60)
-                
-                # push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
-
-                # push!(to_plot, scatter(x=xx, y=results["loadleft"], name="Load Left"))
-                # push!(to_plot, scatter(x=xx, y=grid_price[history_steps:end], name="Grid Price"))
-
-
-                # for k in 1:n_windCORES
-                #     push!(to_plot, scatter(x=xx, y=results["hpc$k"], name="WindCORE utilization $k"))
-                # end
-
-
-                # for k in 1:n_turbines
-                #     push!(to_plot, scatter(x=xx, y=wind[k][history_steps:end], name="Wind Power $k"))
-                # end
-
-                # p = plot(Vector(to_plot), layout)
-                # display(p)
-
-
-                is_stop = true
-            end
+        for i in 1:optimal_trainings
+            RL._update_IL!(agent.policy, optimal_trajectory)
         end
 
 
