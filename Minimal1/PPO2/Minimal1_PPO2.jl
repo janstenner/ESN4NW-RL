@@ -200,7 +200,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.9997f0
-p = 0.99f0
+p = 0.95f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
@@ -208,24 +208,25 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 60_000
 
 
-learning_rate = 3e-4
-n_epochs = 5
-n_microbatches = 100
+learning_rate = 6e-5
+n_epochs = 1
+n_microbatches = 30
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1
-clip_grad = 0.5
-target_kl = Inf#10.0
-clip1 = false
+clip_grad = 0.2
+target_kl = 0.1
+clip1 = true
 start_logσ = -0.9
 tanh_end = false
 clip_range = 0.2f0
 
 betas = (0.9, 0.99)
-noise = "perlin"
+noise = nothing #"perlin"
 noise_scale = 20
 normalize_advantage = true
-fear_factor = 0.005
+fear_scale = 0.01
+new_loss = false
 adaptive_weights = true
 
 
@@ -444,9 +445,15 @@ function initialize_setup(;use_random_init = false)
                 Dense(dim, dim, fun),
                 Dense(dim, 1)
             ),
+            critic2 = Chain(
+                Dense(state_dim + 1, dim, fun),
+                Dense(dim, dim, fun),
+                Dense(dim, 1)
+            ),
             optimizer_actor = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-3, betas)),
             optimizer_sigma = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-3, betas)),
             optimizer_critic = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-5, betas)),
+            optimizer_critic2 = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-5, betas)),
         )
 
         global agent = create_agent_ppo2(
@@ -478,7 +485,8 @@ function initialize_setup(;use_random_init = false)
                 noise = noise,
                 noise_scale = noise_scale,
                 normalize_advantage = normalize_advantage,
-                fear_factor = fear_factor,
+                fear_scale = fear_scale,
+                new_loss = new_loss,
                 adaptive_weights = adaptive_weights)
 
 
@@ -882,11 +890,13 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
         #action = agent(env)
 
-        push!(values, agent.policy.approximator.critic(env.state)[1])
+        value = agent.policy.approximator.critic(env.state)[1]
+        push!(values, value)
+        push!(next_values, value + agent.policy.approximator.critic2(vcat(env.state, action))[1])
 
         env(action)
 
-        push!(next_values, agent.policy.approximator.critic(env.state)[1])
+        
 
         for k in 1:n_windCORES
             push!(results["hpc$k"], env.p[k])
@@ -971,6 +981,9 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
                 showscale=false
             ),
             line=attr(color = "rgba(200, 200, 200, 0.3)")))
+        
+        push!(to_plot, scatter(x=xx, y=values, name="Values", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=next_values, name="Next Values", yaxis = "y2"))
     else
         push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
     end
@@ -1141,9 +1154,10 @@ function plot_trajectory()
     t = agent.trajectory
     AC = agent.policy.approximator
     states = collect(flatten_batch(t[:state]))
+    actions = collect(flatten_batch(t[:action]))
 
     values = AC.critic(states)
-    next_values = collect(flatten_batch(t[:next_values]))
+    next_values = values + AC.critic2(vcat(states, actions))
 
     advantages, returns = generalized_advantage_estimation(
         t[:reward],
