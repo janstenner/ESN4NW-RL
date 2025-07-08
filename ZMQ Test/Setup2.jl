@@ -14,6 +14,7 @@ using Statistics
 using JuMP
 using Ipopt
 using ZMQ
+using JSON
 #using Blink
 
 n_turbines = 1
@@ -34,10 +35,8 @@ end
 
 
 
-#s1=Socket(REP)
 s2=Socket(REQ)
 
-#bind(s1, "tcp://*:5555")
 connect(s2, "tcp://localhost:5555")
 
 for i in 1:100
@@ -46,8 +45,6 @@ for i in 1:100
     println(msg)
 end
 
-#send(s1, "test response")
-#close(s1)
 close(s2)
 
 # action vector dim - contains the percentage of maximum power the HPC in the turbine will use for the duration of next time step
@@ -415,193 +412,15 @@ initialize_setup()
 
 # plotrun(use_best = false, plot3D = true)
 
-function train_wind_only(;num_steps = 10_000, loops = 10)
-    global wind_only
-    wind_only = true
 
-    for i = 1:loops
-        println("")
-        stop_condition = StopAfterEpisodeWithMinSteps(num_steps)
-
-
-        # run start
-        hook(PRE_EXPERIMENT_STAGE, agent, env)
-        agent(PRE_EXPERIMENT_STAGE, env)
-        is_stop = false
-        while !is_stop
-            reset!(env)
-            agent(PRE_EPISODE_STAGE, env)
-            hook(PRE_EPISODE_STAGE, agent, env)
-
-            while !is_terminated(env) # one episode
-                action = agent(env)
-
-                agent(PRE_ACT_STAGE, env, action)
-                hook(PRE_ACT_STAGE, agent, env, action)
-
-                env(action)
-
-                agent(POST_ACT_STAGE, env)
-                hook(POST_ACT_STAGE, agent, env)
-
-                if stop_condition(agent, env)
-                    is_stop = true
-                    break
-                end
-            end # end of an episode
-
-            if is_terminated(env)
-                agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
-                hook(POST_EPISODE_STAGE, agent, env)
-            end
-        end
-        hook(POST_EXPERIMENT_STAGE, agent, env)
-        # run end
-
-
-        println(hook.bestreward)
-
-        # hook.rewards = clamp.(hook.rewards, -3000, 0)
-
-        render_run()
-    end
-end
-
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimized_episodes  = 4, outer_loops = 10, steps = 2000, only_wind_steps = 0)
-    global wind_only
-    wind_only = false
-    
-    rm(dirpath * "/training_frames/", recursive=true, force=true)
-    mkdir(dirpath * "/training_frames/")
-    frame = 1
+function train(;visuals = true, num_steps = 10_000, inner_loops = 1, outer_loops = 1)
 
     if visuals
-        colorscale = [[0, "rgb(34, 74, 168)"], [0.5, "rgb(224, 224, 180)"], [1, "rgb(156, 33, 11)"], ]
-        ymax = 30
-        layout = Layout(
-                plot_bgcolor="#f1f3f7",
-                coloraxis = attr(cmin = 0, cmid = 1, cmax = 2, colorscale = colorscale),
-            )
-    end
-
-    if use_random_init
-        hook.generate_random_init = generate_random_init
-    else
-        hook.generate_random_init = false
+        s2=Socket(REQ)
+        connect(s2, "tcp://localhost:5555")
     end
     
-
     for j = 1:outer_loops
-        
-        println("")
-        println("Starting optimized episodes learning...")
-
-        for i in 1:optimized_episodes
-
-            # run start
-            agent(PRE_EXPERIMENT_STAGE, env)
-            is_stop = false
-            while !is_stop
-                println("Optimized Episode $(i)...")
-                reset!(env)
-                agent(PRE_EPISODE_STAGE, env)
-
-                env.y0 = generate_random_init()
-                env.y = deepcopy(env.y0)
-                env.state = env.featurize(; env = env)
-
-                # generate optimal actions
-                optimal_actions = optimize_day(steps; verbose = false)
-                n = 1
-
-                while !is_terminated(env) # one episode
-                    # action = agent(env)
-
-                    if n <= size(optimal_actions)[2]
-                        action = optimal_actions[:,n]
-                    else
-                        # just in case y[1] is not exactly 0.0 due to numerical errors
-                        action = [ 0.001 ]
-                    end
-
-                    agent(PRE_ACT_STAGE, env, action)
-
-                    env(action)
-
-                    agent(POST_ACT_STAGE, env)
-
-                    if visuals
-                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
-
-                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
-                    end
-
-                    frame += 1
-                    n += 1
-                end # end of an episode
-
-                if is_terminated(env)
-                    agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
-                end
-
-                is_stop = true
-            end
-        end
-
-
-        if only_wind_steps > 0
-            println("")
-            println("Starting only wind learning...")
-            stop_condition = StopAfterEpisodeWithMinSteps(only_wind_steps)
-
-            global grid_price
-            grid_price = ones(size(grid_price))
-
-            # run start
-            hook(PRE_EXPERIMENT_STAGE, agent, env)
-            agent(PRE_EXPERIMENT_STAGE, env)
-            is_stop = false
-            while !is_stop
-                reset!(env)
-                agent(PRE_EPISODE_STAGE, env)
-                hook(PRE_EPISODE_STAGE, agent, env)
-
-
-
-                while !is_terminated(env) # one episode
-                    action = agent(env)
-
-                    agent(PRE_ACT_STAGE, env, action)
-                    hook(PRE_ACT_STAGE, agent, env, action)
-
-                    env(action)
-
-                    agent(POST_ACT_STAGE, env)
-                    hook(POST_ACT_STAGE, agent, env)
-
-                    if visuals
-                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
-
-                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
-                    end
-
-                    frame += 1
-
-                    if stop_condition(agent, env)
-                        is_stop = true
-                        break
-                    end
-                end # end of an episode
-
-                if is_terminated(env)
-                    agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
-                    hook(POST_EPISODE_STAGE, agent, env)
-                end
-            end
-            hook(POST_EXPERIMENT_STAGE, agent, env)
-        end
-
-
         for i = 1:inner_loops
             println("")
             stop_condition = StopAfterEpisodeWithMinSteps(num_steps)
@@ -628,12 +447,11 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
                     hook(POST_ACT_STAGE, agent, env)
 
                     if visuals
-                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
-
-                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
+                        statedict = Dict("state" => env.state[:],
+                                        "action" => env.p[:])
+                        send(s2, JSON.json(statedict))
+                        recv(s2, String)
                     end
-
-                    frame += 1
 
                     if stop_condition(agent, env)
                         is_stop = true
@@ -654,15 +472,14 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
-            render_run()
+            #render_run()
         end
 
 
     end
 
-    if visuals && false
-        rm(dirpath * "/training.mp4", force=true)
-        run(`ffmpeg -framerate 16 -i $(dirpath * "/training_frames/a%05d.png") -c:v libx264 -crf 21 -an -pix_fmt yuv420p10le $(dirpath * "/training.mp4")`)
+    if visuals
+        close(s2)
     end
 
     #save()
