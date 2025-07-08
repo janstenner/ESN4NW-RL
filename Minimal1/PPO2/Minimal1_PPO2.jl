@@ -664,7 +664,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
 
         for i in 1:optimal_trainings
-            RL._update_IL!(agent.policy, optimal_trajectory)
+            RL._update!(agent.policy, optimal_trajectory)
         end
 
 
