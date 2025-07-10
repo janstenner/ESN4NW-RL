@@ -190,8 +190,8 @@ sim_space = Space(fill(0..1, (state_dim)))
 memory_size = 0
 nna_scale = 1.6
 nna_scale_critic = 0.8
-drop_middle_layer = false
-drop_middle_layer_critic = false
+drop_middle_layer = true
+drop_middle_layer_critic = true
 fun = gelu
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
@@ -200,7 +200,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.9997f0
-p = 0.95f0
+p = 0.0f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
@@ -208,20 +208,20 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 60_000
 
 
-learning_rate = 6e-5
-n_epochs = 1
+learning_rate = 2e-5
+n_epochs = 5
 n_microbatches = 30
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1
-clip_grad = 0.2
-target_kl = 0.1
+clip_grad = 0.5
+target_kl = Inf #0.001
 clip1 = true
-start_logσ = -0.9
+start_logσ = -0.5
 tanh_end = false
-clip_range = 0.2f0
+clip_range = 0.05f0
 
-betas = (0.9, 0.99)
+betas = (0.0, 0.0)
 noise = nothing #"perlin"
 noise_scale = 20
 normalize_advantage = true
@@ -784,10 +784,10 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             
         end
 
-        p1 = render_run(; exploration = true, return_plot = true, gae = true)
+        p1 = render_run(; exploration = true, gae = true)#, plot_critic2 = true)
         #p2 = plot_critic(; return_plot = true)
         #display([p1 p2])
-        display(p1)
+        #display(p1)
 
     end
 
@@ -833,7 +833,7 @@ end
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false, plot_values = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false, plot_values = false, plot_critic2 = false)
     global history_steps
 
     if show_training_episode
@@ -872,6 +872,9 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
     values = []
     next_values = []
+    states = []
+    mus = []
+    terminals = []
 
     reset!(env)
     generate_random_init()
@@ -880,10 +883,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
         if exploration
             action = agent(env)
+            μ = agent.policy.last_mu[1]
             σ = agent.policy.last_sigma
         else
             prob_temp = prob(agent.policy, env)
             action = prob_temp.μ
+            μ = prob_temp.μ[1]
             σ = prob_temp.σ
         end
         
@@ -892,11 +897,15 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
         value = agent.policy.approximator.critic(env.state)[1]
         push!(values, value)
-        push!(next_values, value + agent.policy.approximator.critic2(vcat(env.state, action))[1])
+        offset = agent.policy.approximator.critic2(vcat(env.state, μ))[1]
+        push!(next_values, value + agent.policy.approximator.critic2(vcat(env.state, action))[1] - offset)
+        push!(states, env.state)
+        push!(mus, μ)
 
         env(action)
 
-        
+        push!(terminals, env.done)
+
 
         for k in 1:n_windCORES
             push!(results["hpc$k"], env.p[k])
@@ -967,8 +976,17 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             values,
             next_values,
             y,
-            p
+            p;
+            terminal=terminals
         )
+
+
+        println("Last Reward: $(results["rewards"][end])")
+        println("Last Value: $(values[end])")
+        println("Last Next Value: $(next_values[end])")
+        println("Right Last Advantage Value: $(results["rewards"][end] - values[end])")
+        println("Wrong Last Advantage Value: $(results["rewards"][end] + y * next_values[end]- values[end])")
+        println("Actual Last Advantage Value: $(advantages[end])")
 
         push!(to_plot, scatter(x=xx, y=advantages, name="Advantage", yaxis = "y2",
             mode="lines+markers",
@@ -1030,6 +1048,34 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         return plott
     else
         display(plott)
+    end
+
+    if plot_critic2
+
+        layout = Layout(
+                plot_bgcolor="#f1f3f7",
+                coloraxis = attr(cmid = 0, colorscale = colorscale),
+            )
+
+        actions = collect(-1:0.02:1)
+
+        results = zeros(Float32, length(actions), length(states))
+
+        for (i,state) in enumerate(states)
+            inputs = vcat(repeat(state, 1, length(actions)), actions')
+
+            critic2_values = agent.policy.approximator.critic2(inputs)[:] #-1 first
+
+            idx = clamp(searchsortedfirst(actions, mus[i]), 1, length(actions))
+            # mu_value = critic2_values[idx]
+            # critic2_values .-= mu_value
+            critic2_values[idx] = 0.0
+
+            results[:,i] = critic2_values
+        end
+
+        display(plot(heatmap(x = xx, y = actions, z=results, coloraxis="coloraxis"), layout))
+
     end
 end
 
