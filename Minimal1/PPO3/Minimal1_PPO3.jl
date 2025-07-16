@@ -205,13 +205,13 @@ p = 0.0f0
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 7_000
-update_freq_no_exploration = 40_000
+update_freq = 60_000
+update_freq_no_exploration = 60_000
 
 
-learning_rate = 9e-5
+learning_rate = 2e-4
 n_epochs = 5
-n_microbatches = 30
+n_microbatches = 20
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0.05
@@ -220,7 +220,7 @@ target_kl = Inf #0.001
 clip1 = true
 start_logσ = -1.4
 tanh_end = false
-clip_range = 0.4f0
+clip_range = 0.3f0
 
 betas = (0.8, 0.98)
 noise = nothing #"perlin"
