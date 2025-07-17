@@ -205,11 +205,11 @@ p = 0.0f0
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 60_000
-update_freq_no_exploration = 60_000
+update_freq = 10_000
+update_freq_no_exploration = 10_000
 
 
-learning_rate = 2e-4
+learning_rate = 1e-4
 n_epochs = 5
 n_microbatches = 20
 logσ_is_network = false
@@ -220,7 +220,7 @@ target_kl = Inf #0.001
 clip1 = true
 start_logσ = -1.4
 tanh_end = false
-clip_range = 0.3f0
+clip_range = 0.05f0
 
 betas = (0.8, 0.98)
 noise = nothing #"perlin"
@@ -884,7 +884,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     while !env.done
 
         if exploration
-            action = agent(env)
+            action = agent.policy(env; ignore_explore_mode = true)
             μ = agent.policy.last_mu[1]
             σ = agent.policy.last_sigma
         else
