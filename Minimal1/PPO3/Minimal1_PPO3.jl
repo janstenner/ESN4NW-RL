@@ -188,8 +188,8 @@ sim_space = Space(fill(0..1, (state_dim)))
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 2.6
-nna_scale_critic = 1.8
+nna_scale = 1.4
+nna_scale_critic = 1.0
 drop_middle_layer = true
 drop_middle_layer_critic = true
 fun = gelu
@@ -199,31 +199,31 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 1.0f0 #0.9997f0
+y = 1.0f0 #0.99997f0
 p = 0.0f0
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 10_000
-update_freq_no_exploration = 10_000
+update_freq = 1_000
+update_freq_no_exploration = 1_000
 
 
-learning_rate = 1e-4
-n_epochs = 5
-n_microbatches = 20
+learning_rate = 1e-5
+n_epochs = 3
+n_microbatches = 10
 logσ_is_network = false
 max_σ = 1.0f0
-entropy_loss_weight = 0.05
+entropy_loss_weight = 0.0035
 clip_grad = 0.5
-target_kl = Inf #0.001
-clip1 = true
+target_kl = 0.0001
+clip1 = false
 start_logσ = -1.4
 tanh_end = false
-clip_range = 0.05f0
+clip_range = 0.1f0
 
-betas = (0.8, 0.98)
-noise = nothing #"perlin"
+betas = (0.9, 0.9)
+noise = nothing#"perlin"
 noise_scale = 20
 normalize_advantage = true
 fear_scale = 0.001
@@ -348,7 +348,7 @@ function calculate_day(action, env, step = nothing)
 
         if !isnothing(env) 
             if (env.time + env.dt) >= env.te 
-                reward -= compute_left * 4
+                reward -= compute_left * 1.2#4
             end
         end
     end
@@ -641,7 +641,7 @@ function fill_optimal_trajectory(; steps = 4000)
 
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimal_trainings  = 0, outer_loops = 360, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimal_trainings  = 0, outer_loops = 9360, only_wind_steps = 0)
     global wind_only, optimal_trajectory
     wind_only = false
     
@@ -786,10 +786,8 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             
         end
 
-        p1 = render_run(; exploration = true, gae = true, plot_critic2 = true, critic2_diagnostics = true)
-        #p2 = plot_critic(; return_plot = true)
-        #display([p1 p2])
-        #display(p1)
+        render_run(; exploration = true, gae = true, plot_critic2 = true, critic2_diagnostics = true)
+        #render_run(; exploration = true, gae = true)
 
     end
 
@@ -872,8 +870,9 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         results["σ$k"] = []
     end
 
-    values = []
-    next_values = []
+    values1 = []
+    values3 = []
+    q_values = []
     states = []
     mus = []
     terminals = []
@@ -895,12 +894,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         end
         
 
-        #action = agent(env)
-
-        value = agent.policy.approximator.critic(env.state)[1]
-        push!(values, value)
+        value1 = agent.policy.approximator.critic(vcat(env.state, 0.0f0))[1]
+        push!(values1, value1)
+        value3 = agent.policy.approximator.critic(vcat(env.state, 1.0f0))[1]
+        push!(values3, value3)
         offset = agent.policy.approximator.critic2(vcat(env.state, μ))[1]
-        push!(next_values, agent.policy.approximator.critic2(vcat(env.state, action))[1] - offset)
+        push!(q_values, agent.policy.approximator.critic2(vcat(env.state, action))[1] - offset)
         push!(states, env.state)
         push!(mus, μ)
 
@@ -973,44 +972,39 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         end
     elseif gae
         #values = RL.prepare_values(values, terminals)
-        next_values = values + next_values
 
-        global y, p
-        advantages, returns = generalized_advantage_estimation(
-            results["rewards"],
-            values,
-            next_values,
-            y,
-            p;
-            terminal=terminals
-        )
+        # global y, p
+        # advantages, returns = generalized_advantage_estimation(
+        #     results["rewards"],
+        #     values,
+        #     next_values,
+        #     y,
+        #     p;
+        #     terminal=terminals
+        # )
 
-        advantages = next_values - values
+        advantages = q_values
 
         advantages = (advantages .- mean(advantages)) ./ clamp(std(advantages), 1e-8, 1000.0)
 
-
-        println("Last Reward: $(results["rewards"][end])")
-        println("Last Value: $(values[end])")
-        println("Last Next Value: $(next_values[end])")
-        println("Right Last Advantage Value: $(results["rewards"][end] - values[end])")
-        println("Wrong Last Advantage Value: $(results["rewards"][end] + y * next_values[end]- values[end])")
-        println("Actual Last Advantage Value: $(advantages[end])")
 
         push!(to_plot, scatter(x=xx, y=results["hpc1"], name="Advantage",
             mode="markers",
             marker=attr(
                 color=advantages,               # array of numbers
-                cmin = -1.0,
+                cmin = minimum(advantages),
                 cmid = 0.0,
-                cmax = 1.0,
+                cmax = maximum(advantages),
                 colorscale=colorscale,
                 showscale=false
             ),
             line=attr(color = "rgba(200, 200, 200, 0.3)")))
         
-        push!(to_plot, scatter(x=xx, y=values, name="Values", yaxis = "y2"))
-        push!(to_plot, scatter(x=xx, y=next_values, name="Next Values", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=values1, name="Values1", yaxis = "y2",
+                        line=attr(color = "rgba(0, 100, 200, 0.4)")))
+        push!(to_plot, scatter(x=xx, y=values3, name="Values3", yaxis = "y2",
+                        line=attr(color = "rgba(0, 200, 100, 0.4)")))
+        # push!(to_plot, scatter(x=xx, y=values3 + q_values, name="Next Values", yaxis = "y2"))
     else
         push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
     end
@@ -1126,11 +1120,15 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
             if critic2_diagnostics
                 idx = clamp(searchsortedfirst(actions, state[end-1] * 2 - 1), 1, length(actions))
+
+                idx2 = findmax(results[:,i])[2]
             else
-                idx = clamp(searchsortedfirst(actions, mus[i]), 1, length(actions))
+                mu = agent.policy.approximator.actor.μ(state)[1]
+                idx = clamp(searchsortedfirst(actions, mu), 1, length(actions))
             end
 
             results[idx,i] = min_val
+            results[idx2,i] = -min_val
         end
 
         display(plot(heatmap(x = xx, y = actions, z=results, coloraxis="coloraxis"), layout))
