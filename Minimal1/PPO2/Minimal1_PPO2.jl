@@ -114,7 +114,7 @@ function generate_grid_price()
 end
 
 include_history_steps = 1
-include_gradients = 0
+include_gradients = 2
 
 function create_state(; env = nothing, compute_left = 1.0, step = 0)
     global wind, grid_price, curtailment_threshold, history_steps, dt, include_history_steps, include_gradients
@@ -208,18 +208,18 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 10_000
 
 
-learning_rate = 1e-5
-n_epochs = 5
+learning_rate = 1e-4
+n_epochs = 4
 n_microbatches = 30
 logσ_is_network = false
 max_σ = 1.0f0
-entropy_loss_weight = 0.05
+entropy_loss_weight = 0.01
 clip_grad = 0.5
 target_kl = Inf #0.001
-clip1 = true
+clip1 = false
 start_logσ = -1.4
 tanh_end = false
-clip_range = 0.3f0
+clip_range = 0.1f0
 
 betas = (0.8, 0.98)
 noise = nothing #"perlin"
@@ -347,7 +347,7 @@ function calculate_day(action, env, step = nothing)
 
         if !isnothing(env) 
             if (env.time + env.dt) >= env.te 
-                reward -= compute_left * 4
+                reward -= compute_left * 1.2
             end
         end
     end
@@ -416,45 +416,7 @@ function initialize_setup(;use_random_init = false)
 
 
         
-        dim = 15
-
-        logσ = Chain(
-            Dense(state_dim, dim, relu, bias = false),
-            Dense(dim, dim, relu, bias = false),
-            Dense(dim, 1, identity, bias = false)
-        )
-
-        # logσ.layers[1].weight[:] .*= 0.2
-        # logσ.layers[2].weight[:] .*= 0.2
-        logσ.layers[3].weight[:] .*= 0.8
-        logσ.layers[3].weight[:] = -(abs.(logσ.layers[3].weight[:]))
-
-        approximator = ActorCritic2(
-            actor = GaussianNetwork(
-                μ = Chain(
-                    Dense(state_dim, dim, fun),
-                    Dense(dim, dim, fun),
-                    Dense(dim, 1)
-                ),
-                logσ = logσ,
-                logσ_is_network = true,
-                max_σ = max_σ,
-            ),
-            critic = Chain(
-                Dense(state_dim, dim, fun),
-                Dense(dim, dim, fun),
-                Dense(dim, 1)
-            ),
-            critic2 = Chain(
-                Dense(state_dim + 1, dim, fun),
-                Dense(dim, dim, fun),
-                Dense(dim, 1)
-            ),
-            optimizer_actor = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-3, betas)),
-            optimizer_sigma = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-3, betas)),
-            optimizer_critic = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-5, betas)),
-            optimizer_critic2 = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-5, betas)),
-        )
+        
 
         global agent = create_agent_ppo2(
                 # approximator = approximator,
@@ -639,7 +601,7 @@ function fill_optimal_trajectory(; steps = 4000)
 
 end
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimal_trainings  = 0, outer_loops = 360, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimal_trainings  = 0, outer_loops = 3360, only_wind_steps = 0)
     global wind_only, optimal_trajectory
     wind_only = false
     
@@ -784,7 +746,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             
         end
 
-        p1 = render_run(; exploration = true, gae = true, plot_critic2 = true, critic2_diagnostics = true)
+        p1 = render_run(; exploration = true, gae = true)#, plot_critic2 = true, critic2_diagnostics = true)
         #p2 = plot_critic(; return_plot = true)
         #display([p1 p2])
         #display(p1)
@@ -896,19 +858,25 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         #action = agent(env)
 
         value = agent.policy.approximator.critic(env.state)[1]
+        value = agent.policy.approximator.critic2(vcat(env.state, μ))[1]
         push!(values, value)
+
+        next_value = agent.policy.approximator.critic2(vcat(env.state, action))[1]
+        push!(next_values, next_value)
+
         offset = agent.policy.approximator.critic2(vcat(env.state, μ))[1]
-        push!(next_values, agent.policy.approximator.critic2(vcat(env.state, action))[1] - offset)
+        #push!(next_values, agent.policy.approximator.critic2(vcat(env.state, action))[1] - offset)
         push!(states, env.state)
         push!(mus, μ)
 
+        temp_state = deepcopy(env.state)
         env(action)
 
         push!(terminals, env.done)
 
 
         for k in 1:n_windCORES
-            push!(results["hpc$k"], env.p[k])
+            push!(results["hpc$k"], clamp((action[1]+1)*0.5, 0, 1)) #env.p[k])
             push!(results["σ$k"], σ[k])
         end
         push!(results["rewards"], env.reward[1])
@@ -948,7 +916,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
                                 linecolor = "#888888"),
                     yaxis = attr(gridcolor = "#E0E0E0FF",
                                 linecolor = "#888888",
-                                range=[0,1]),
+                    ),#range=[0,1]),
                     yaxis2 = attr(
                         overlaying="y",
                         side="right",
@@ -970,20 +938,20 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             push!(to_plot, scatter(x=xx, y=results["σ$k"], name="σ$k", yaxis = "y2"))
         end
     elseif gae
-        #values = RL.prepare_values(values, terminals)
-        next_values = values + next_values
+
+        deltas = next_values - values
 
         global y, p
         advantages, returns = generalized_advantage_estimation(
-            results["rewards"],
-            values,
-            next_values,
+            deltas,
+            zeros(Float32, size(deltas)),
+            zeros(Float32, size(deltas)),
             y,
             p;
             terminal=terminals
         )
 
-        advantages = next_values - values
+        #advantages = next_values #- values
 
         advantages = (advantages .- mean(advantages)) ./ clamp(std(advantages), 1e-8, 1000.0)
 
