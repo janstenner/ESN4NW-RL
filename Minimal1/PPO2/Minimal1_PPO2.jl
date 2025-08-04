@@ -139,6 +139,17 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
     end
 
 
+    #test
+    # y = []
+    # for i in 1:n_turbines
+    #     for j in history_steps:-1:(1 + (history_steps - include_history_steps))
+    #         push!(y, wind[i][j+step])
+    #     end
+    # end
+    # push!(y, time)
+    # return Float32.(y)
+
+
     for i in history_steps:-1:(1 + (history_steps - include_history_steps))
         push!(y, grid_price[i+step])
     end
@@ -208,17 +219,17 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 10_000
 
 
-learning_rate = 1e-4
+learning_rate = 5e-5
 n_epochs = 4
 n_microbatches = 30
 logσ_is_network = false
 max_σ = 1.0f0
-entropy_loss_weight = 0.01
+entropy_loss_weight = 0.001
 clip_grad = 0.5
 target_kl = Inf #0.001
 clip1 = false
 start_logσ = -1.4
-tanh_end = false
+tanh_end = true
 clip_range = 0.1f0
 
 betas = (0.8, 0.98)
@@ -266,6 +277,8 @@ end
 
 # xx = collect(-1:0.001:1)
 # plot(scatter(y=softplus_shifted.(xx), x=xx))
+
+reward_scale_factor = 10
 
 function calculate_day(action, env, step = nothing)
     global curtailment_threshold, wind, grid_price, history_steps
@@ -342,12 +355,11 @@ function calculate_day(action, env, step = nothing)
         compute_power_used *= (n_turbines * 0.01)
         
         reward1 = compute_power_used * grid_price[step-1]
-
-        reward = - reward1 #+ special_reward * 0.1
+        reward = - reward1 * reward_scale_factor
 
         if !isnothing(env) 
             if (env.time + env.dt) >= env.te 
-                reward -= compute_left * 1.2
+                reward -= compute_left * 1.0  * reward_scale_factor
             end
         end
     end
@@ -746,7 +758,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             
         end
 
-        p1 = render_run(; exploration = true, gae = true)#, plot_critic2 = true, critic2_diagnostics = true)
+        p1 = render_run(; exploration = true, gae = true, plot_critic2 = true, critic2_diagnostics = true)
         #p2 = plot_critic(; return_plot = true)
         #display([p1 p2])
         #display(p1)
@@ -1077,11 +1089,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             inputs = vcat(repeat(state, 1, length(actions)), actions')
 
             mu = agent.policy.approximator.actor.μ(state)[:]
-            mus = mu .* ones(length(actions))
+            mu_value = agent.policy.approximator.critic2(vcat(state, mu))
+            mu_values = mu_value .* ones(length(actions))
 
             critic2_values = agent.policy.approximator.critic2(inputs)[:] #-1 first
 
-            results[:,i] = critic2_values #- mus
+            results[:,i] = critic2_values - mu_values
         end
 
         results = (results .- mean(results)) ./ clamp(std(results), 1e-8, 1000.0)
@@ -1092,6 +1105,9 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
             if critic2_diagnostics
                 idx = clamp(searchsortedfirst(actions, state[end-1] * 2 - 1), 1, length(actions))
+
+                idx2 = findmax(results[:,i])[2]
+                results[idx2,i] = -min_val
             else
                 idx = clamp(searchsortedfirst(actions, mus[i]), 1, length(actions))
             end

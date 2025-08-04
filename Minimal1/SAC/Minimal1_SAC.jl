@@ -139,6 +139,17 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0)
     end
 
 
+    #test
+    # y = []
+    # for i in 1:n_turbines
+    #     for j in history_steps:-1:(1 + (history_steps - include_history_steps))
+    #         push!(y, wind[i][j+step])
+    #     end
+    # end
+    # push!(y, time)
+    # return Float32.(y)
+
+
     for i in history_steps:-1:(1 + (history_steps - include_history_steps))
         push!(y, grid_price[i+step])
     end
@@ -187,48 +198,36 @@ sim_space = Space(fill(0..1, (state_dim)))
 
 
 # agent tuning parameters
-memory_size = 0
 nna_scale = 1.4
-nna_scale_critic = 1.0
-drop_middle_layer = true
-drop_middle_layer_critic = true
+nna_scale_critic = 1.4
+drop_middle_layer = false
+drop_middle_layer_critic = false
 fun = gelu
+logσ_is_network = true
+tanh_end = false
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
 
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 1.0f0 #0.99997f0
-p = 0.0f0
-
-start_steps = -1
-start_policy = ZeroPolicy(actionspace)
-
-update_freq = 1_000
-update_freq_no_exploration = 1_000
+y = 0.9997f0
+a = 0.00002f0
+t = 0.005f0
 
 
-learning_rate = 1e-5
-n_epochs = 3
-n_microbatches = 10
-logσ_is_network = false
-max_σ = 1.0f0
-entropy_loss_weight = 0.0035
-clip_grad = 0.5
-target_kl = 0.0001
-clip1 = false
-start_logσ = -1.4
-tanh_end = false
-clip_range = 0.1f0
+learning_rate = 3e-4
+trajectory_length = 1_000_000
+batch_size = 100
+update_after = 1000
+update_freq = 50
+update_loops = 3
+clip_grad = 0.8
+start_logσ = -1.5
+automatic_entropy_tuning = true
 
-betas = (0.9, 0.9)
-noise = nothing#"perlin"
-noise_scale = 20
-normalize_advantage = true
-fear_scale = 0.001
-new_loss = false
-adaptive_weights = true
+betas = (0.8, 0.98)
+
 
 
 wind_only = false
@@ -267,6 +266,8 @@ end
 
 # xx = collect(-1:0.001:1)
 # plot(scatter(y=softplus_shifted.(xx), x=xx))
+
+reward_scale_factor = 10
 
 function calculate_day(action, env, step = nothing)
     global curtailment_threshold, wind, grid_price, history_steps
@@ -343,12 +344,11 @@ function calculate_day(action, env, step = nothing)
         compute_power_used *= (n_turbines * 0.01)
         
         reward1 = compute_power_used * grid_price[step-1]
-
-        reward = - reward1 #+ special_reward * 0.1
+        reward = - reward1 * reward_scale_factor
 
         if !isnothing(env) 
             if (env.time + env.dt) >= env.te 
-                reward -= compute_left * 1.2#4
+                reward -= compute_left * 1.0  * reward_scale_factor
             end
         end
     end
@@ -417,79 +417,33 @@ function initialize_setup(;use_random_init = false)
 
 
         
-        dim = 15
+        
 
-        logσ = Chain(
-            Dense(state_dim, dim, relu, bias = false),
-            Dense(dim, dim, relu, bias = false),
-            Dense(dim, 1, identity, bias = false)
-        )
-
-        # logσ.layers[1].weight[:] .*= 0.2
-        # logσ.layers[2].weight[:] .*= 0.2
-        logσ.layers[3].weight[:] .*= 0.8
-        logσ.layers[3].weight[:] = -(abs.(logσ.layers[3].weight[:]))
-
-        approximator = ActorCritic2(
-            actor = GaussianNetwork(
-                μ = Chain(
-                    Dense(state_dim, dim, fun),
-                    Dense(dim, dim, fun),
-                    Dense(dim, 1)
-                ),
-                logσ = logσ,
-                logσ_is_network = true,
-                max_σ = max_σ,
-            ),
-            critic = Chain(
-                Dense(state_dim, dim, fun),
-                Dense(dim, dim, fun),
-                Dense(dim, 1)
-            ),
-            critic2 = Chain(
-                Dense(state_dim + 1, dim, fun),
-                Dense(dim, dim, fun),
-                Dense(dim, 1)
-            ),
-            optimizer_actor = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-3, betas)),
-            optimizer_sigma = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-3, betas)),
-            optimizer_critic = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-5, betas)),
-            optimizer_critic2 = Optimisers.OptimiserChain(Optimisers.ClipNorm(clip_grad), Optimisers.Adam(1e-5, betas)),
-        )
-
-        global agent = create_agent_ppo3(
-                # approximator = approximator,
+        global agent = create_agent_sac(
                 action_space = actionspace,
                 state_space = env.state_space,
-                use_gpu = use_gpu, 
                 rng = rng,
-                y = y, p = p,
+                y = y,
+                a = a,
+                t = t,
+                use_gpu = use_gpu,
+                update_after = update_after,
                 update_freq = update_freq,
-                update_freq_no_exploration = update_freq_no_exploration,
+                update_loops = update_loops,
+                trajectory_length = trajectory_length,
+                batch_size = batch_size,
                 learning_rate = learning_rate,
                 nna_scale = nna_scale,
                 nna_scale_critic = nna_scale_critic,
                 drop_middle_layer = drop_middle_layer,
                 drop_middle_layer_critic = drop_middle_layer_critic,
                 fun = fun,
-                clip1 = clip1,
-                n_epochs = n_epochs,
-                n_microbatches = n_microbatches,
                 logσ_is_network = logσ_is_network,
-                max_σ = max_σ,
-                entropy_loss_weight = entropy_loss_weight,
                 clip_grad = clip_grad,
-                target_kl = target_kl,
                 start_logσ = start_logσ,
                 tanh_end = tanh_end,
-                clip_range = clip_range,
                 betas = betas,
-                noise = noise,
-                noise_scale = noise_scale,
-                normalize_advantage = normalize_advantage,
-                fear_scale = fear_scale,
-                new_loss = new_loss,
-                adaptive_weights = adaptive_weights)
+                automatic_entropy_tuning = automatic_entropy_tuning)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -512,136 +466,9 @@ end
 
 initialize_setup()
 
-# plotrun(use_best = false, plot3D = true)
-
-function train_wind_only(;num_steps = 10_000, loops = 10)
-    global wind_only
-    wind_only = true
-
-    for i = 1:loops
-        println("")
-        stop_condition = StopAfterEpisodeWithMinSteps(num_steps)
 
 
-        # run start
-        hook(PRE_EXPERIMENT_STAGE, agent, env)
-        agent(PRE_EXPERIMENT_STAGE, env)
-        is_stop = false
-        while !is_stop
-            reset!(env)
-            agent(PRE_EPISODE_STAGE, env)
-            hook(PRE_EPISODE_STAGE, agent, env)
-
-            while !is_terminated(env) # one episode
-                action = agent(env)
-
-                agent(PRE_ACT_STAGE, env, action)
-                hook(PRE_ACT_STAGE, agent, env, action)
-
-                env(action)
-
-                agent(POST_ACT_STAGE, env)
-                hook(POST_ACT_STAGE, agent, env)
-
-                if stop_condition(agent, env)
-                    is_stop = true
-                    break
-                end
-            end # end of an episode
-
-            if is_terminated(env)
-                agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
-                hook(POST_EPISODE_STAGE, agent, env)
-            end
-        end
-        hook(POST_EXPERIMENT_STAGE, agent, env)
-        # run end
-
-
-        println(hook.bestreward)
-
-        # hook.rewards = clamp.(hook.rewards, -3000, 0)
-
-        render_run()
-    end
-end
-
-
-function fill_optimal_trajectory(; steps = 4000)
-    global optimal_trajectory, optimal_episodes, env, action_dim
-
-    if isnothing(optimal_trajectory)
-        n_envs = 1
-        optimal_trajectory = CircularArrayTrajectory(;
-                capacity = Int(te / dt) * optimal_episodes, # fit all episodes
-                state = Float32 => (size(env.state_space)[1], n_envs),
-                action = Float32 => (size(env.action_space)[1], n_envs),
-                action_log_prob = Float32 => (n_envs),
-                reward = Float32 => (n_envs),
-                explore_mod = Float32 => (n_envs),
-                terminal = Bool => (n_envs,),
-                next_values = Float32 => (1, n_envs),
-        )
-    end
-
-    global optimal_rewards = Float64[]
-
-    for i in 1:optimal_episodes
-
-            # run start
-            println("Optimized Episode $(i)...")
-            reset!(env)
-
-            generate_random_init()
-
-            # generate optimal actions
-            optimal_actions = optimize_day(steps; verbose = false)
-            n = 1
-
-            episode_rewards = Float64[]
-
-            while !is_terminated(env) # one episode
-
-                if n <= size(optimal_actions)[2]
-                    # hcat for transforming vectors to matrices
-                    action = hcat(optimal_actions[:,n])
-                else
-                    # just in case y[1] is not exactly 0.0 due to numerical errors
-                    action = 0.001 .* ones(action_dim,1)
-                end
-
-                # importance sampling according to PPO+D
-                last_action_log_prob = zeros(Float32, action_dim)
-
-
-                push!(
-                    optimal_trajectory;
-                    state=env.state,
-                    action=action,
-                    explore_mod=1.0,
-                    action_log_prob=last_action_log_prob,
-                )
-
-                env(action)
-
-                r = reward(env)[:]
-
-                push!(episode_rewards, r[1])
-
-                push!(optimal_trajectory[:reward], r)
-                push!(optimal_trajectory[:terminal], is_terminated(env))
-                push!(optimal_trajectory[:next_values], agent.policy.approximator.critic(env.state))
-
-
-                n += 1
-            end # end of an episode
-
-            push!(optimal_rewards, sum(episode_rewards))
-        end
-
-end
-
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimal_trainings  = 0, outer_loops = 9360, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimal_trainings  = 0, outer_loops = 3360, only_wind_steps = 0)
     global wind_only, optimal_trajectory
     wind_only = false
     
@@ -786,8 +613,10 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             
         end
 
-        render_run(; exploration = true, gae = true, plot_critic2 = true, critic2_diagnostics = true)
-        #render_run(; exploration = true, gae = true)
+        p1 = render_run(; exploration = true, plot_values = true)
+        #p2 = plot_critic(; return_plot = true)
+        #display([p1 p2])
+        #display(p1)
 
     end
 
@@ -833,7 +662,7 @@ end
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false, plot_values = false, plot_critic2 = false, critic2_diagnostics = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, plot_values = false, plot_critic2 = false, critic2_diagnostics = false)
     global history_steps
 
     if show_training_episode
@@ -870,11 +699,9 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         results["σ$k"] = []
     end
 
-    values1 = []
-    values3 = []
-    q_values = []
+    q1 = []
+    q2 = []
     states = []
-    mus = []
     terminals = []
 
     reset!(env)
@@ -883,25 +710,16 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     while !env.done
 
         if exploration
-            action = agent.policy(env; ignore_explore_mode = true)
-            μ = agent.policy.last_mu[1]
-            σ = agent.policy.last_sigma
+            action = agent(env)
         else
-            prob_temp = prob(agent.policy, env)
-            action = prob_temp.μ
-            μ = prob_temp.μ[1]
-            σ = prob_temp.σ
+            action = agent.policy.actor.μ(env.state)
         end
         
 
-        value1 = agent.policy.approximator.critic(vcat(env.state, 0.0f0))[1]
-        push!(values1, value1)
-        value3 = agent.policy.approximator.critic(vcat(env.state, 1.0f0))[1]
-        push!(values3, value3)
-        offset = agent.policy.approximator.critic2(vcat(env.state, μ))[1]
-        push!(q_values, agent.policy.approximator.critic2(vcat(env.state, action))[1] - offset)
-        push!(states, env.state)
-        push!(mus, μ)
+        #action = agent(env)
+
+        push!(q1, agent.policy.qnetwork1(vcat(env.state, action))[1])
+        push!(q2, agent.policy.qnetwork2(vcat(env.state, action))[1])
 
         env(action)
 
@@ -909,8 +727,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
 
         for k in 1:n_windCORES
-            push!(results["hpc$k"], env.p[k])
-            push!(results["σ$k"], σ[k])
+            push!(results["hpc$k"], clamp((action[1]+1)*0.5, 0, 1)) #env.p[k])
+            #push!(results["σ$k"], σ[k])
         end
         push!(results["rewards"], env.reward[1])
         push!(results["loadleft"], env.y[1])
@@ -934,7 +752,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     println(reward_sum)
 
 
-    colorscale = [[0, "rgb(255, 0, 0)"], [0.5, "rgb(255, 255, 0)"], [1, "rgb(0, 255, 0)"], ]
+    colorscale = [[0, "rgb(255, 0, 0)"], [0.5, "rgb(255, 255, 255)"], [1, "rgb(0, 255, 0)"], ]
 
     layout = Layout(
                     plot_bgcolor = "white",
@@ -949,7 +767,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
                                 linecolor = "#888888"),
                     yaxis = attr(gridcolor = "#E0E0E0FF",
                                 linecolor = "#888888",
-                                range=[0,1]),
+                    ),#range=[0,1]),
                     yaxis2 = attr(
                         overlaying="y",
                         side="right",
@@ -970,48 +788,13 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         for k in 1:n_windCORES
             push!(to_plot, scatter(x=xx, y=results["σ$k"], name="σ$k", yaxis = "y2"))
         end
-    elseif gae
-        #values = RL.prepare_values(values, terminals)
-
-        # global y, p
-        # advantages, returns = generalized_advantage_estimation(
-        #     results["rewards"],
-        #     values,
-        #     next_values,
-        #     y,
-        #     p;
-        #     terminal=terminals
-        # )
-
-        advantages = q_values
-
-        advantages = (advantages .- mean(advantages)) ./ clamp(std(advantages), 1e-8, 1000.0)
-
-
-        push!(to_plot, scatter(x=xx, y=results["hpc1"], name="Advantage",
-            mode="markers",
-            marker=attr(
-                color=advantages,               # array of numbers
-                cmin = minimum(advantages),
-                cmid = 0.0,
-                cmax = maximum(advantages),
-                colorscale=colorscale,
-                showscale=false
-            ),
-            line=attr(color = "rgba(200, 200, 200, 0.3)")))
-        
-        push!(to_plot, scatter(x=xx, y=values1, name="Values1", yaxis = "y2",
-                        line=attr(color = "rgba(0, 100, 200, 0.4)")))
-        push!(to_plot, scatter(x=xx, y=values3, name="Values3", yaxis = "y2",
-                        line=attr(color = "rgba(0, 200, 100, 0.4)")))
-        # push!(to_plot, scatter(x=xx, y=values3 + q_values, name="Next Values", yaxis = "y2"))
     else
         push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
     end
 
     if plot_values
-        push!(to_plot, scatter(x=xx, y=values, name="Critic Value", yaxis = "y2"))
-        push!(to_plot, scatter(x=xx, y=returns, name="Return", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=q1, name="q1", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=q2, name="q2", yaxis = "y2"))
     end
 
     push!(to_plot, scatter(x=xx, y=results["loadleft"], name="Load Left"))
@@ -1019,8 +802,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
 
     for k in 1:n_windCORES
-        push!(to_plot, scatter(x=xx, y=results["hpc$k"], name="WindCORE utilization $k",
-        line=attr(color = "rgba(200, 200, 200, 0.3)")))
+        push!(to_plot, scatter(x=xx, y=results["hpc$k"], name="WindCORE utilization $k"))
+        #line=attr(color = "rgba(200, 200, 200, 0.3)")))
     end
 
 
@@ -1105,11 +888,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             inputs = vcat(repeat(state, 1, length(actions)), actions')
 
             mu = agent.policy.approximator.actor.μ(state)[:]
-            mus = mu .* ones(length(actions))
+            mu_value = agent.policy.approximator.critic2(vcat(state, mu))
+            mu_values = mu_value .* ones(length(actions))
 
             critic2_values = agent.policy.approximator.critic2(inputs)[:] #-1 first
 
-            results[:,i] = critic2_values #- mus
+            results[:,i] = critic2_values - mu_values
         end
 
         results = (results .- mean(results)) ./ clamp(std(results), 1e-8, 1000.0)
@@ -1124,12 +908,10 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
                 idx2 = findmax(results[:,i])[2]
                 results[idx2,i] = -min_val
             else
-                mu = agent.policy.approximator.actor.μ(state)[1]
-                idx = clamp(searchsortedfirst(actions, mu), 1, length(actions))
+                idx = clamp(searchsortedfirst(actions, mus[i]), 1, length(actions))
             end
 
             results[idx,i] = min_val
-            
         end
 
         display(plot(heatmap(x = xx, y = actions, z=results, coloraxis="coloraxis"), layout))
