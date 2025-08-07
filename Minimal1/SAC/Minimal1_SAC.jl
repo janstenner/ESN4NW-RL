@@ -14,6 +14,8 @@ using JuMP
 using Ipopt
 using Optimisers
 #using Blink
+using JSON
+using UnicodePlots
 
 
 n_windCORES = 1
@@ -29,7 +31,7 @@ scriptname = "Minimal1"
 dirpath = string(@__DIR__)
 open(dirpath * "/.gitignore", "w") do io
     println(io, "training_frames/*")
-    #println(io, "saves/*")
+    println(io, "saves/*")
 end
 
 
@@ -110,22 +112,25 @@ function generate_grid_price()
 
     clamp!(gp, -1, 1)
 
+    #gp = ones(grid_price_steps)
+
     return gp
 end
 
 include_history_steps = 1
 include_gradients = 2
 
-function create_state(; env = nothing, compute_left = 1.0, step = 0)
+function create_state(; env = nothing, compute_left = 1.0, step = 0, generate_day = true)
     global wind, grid_price, curtailment_threshold, history_steps, dt, include_history_steps, include_gradients
 
 
     if isnothing(env)
         y = [1.0]
 
-        wind = [generate_wind() for i in 1:n_turbines]
-
-        grid_price = generate_grid_price()
+        if generate_day
+            wind = [generate_wind() for i in 1:n_turbines]
+            grid_price = generate_grid_price()
+        end
 
         time = 0.0
 
@@ -198,8 +203,8 @@ sim_space = Space(fill(0..1, (state_dim)))
 
 
 # agent tuning parameters
-nna_scale = 1.4
-nna_scale_critic = 1.4
+nna_scale = 1.6
+nna_scale_critic = 0.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -211,16 +216,18 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.9997f0
-a = 0.00002f0
+y = 0.997f0
+gamma = y
+a = 0.2f0
 t = 0.005f0
+target_entropy = -1.0
 
 
-learning_rate = 3e-4
+learning_rate = 6e-4
 trajectory_length = 1_000_000
-batch_size = 100
-update_after = 1000
-update_freq = 50
+batch_size = 256
+update_after = 1_000
+update_freq = 10
 update_loops = 3
 clip_grad = 0.8
 start_logσ = -1.5
@@ -267,9 +274,9 @@ end
 # xx = collect(-1:0.001:1)
 # plot(scatter(y=softplus_shifted.(xx), x=xx))
 
-reward_scale_factor = 10
+reward_scale_factor = 100
 
-function calculate_day(action, env, step = nothing)
+function calculate_day(action, env, step = nothing; reward_shaping = true)
     global curtailment_threshold, wind, grid_price, history_steps
 
     if !isnothing(env)
@@ -289,6 +296,8 @@ function calculate_day(action, env, step = nothing)
         compute_power += action[i]*0.01/n_windCORES
     end
 
+    compute_left_before = compute_left
+
     if !isnothing(env)
         # subtracting the computed load
         compute_power_used = min(compute_left, compute_power)
@@ -301,6 +310,8 @@ function calculate_day(action, env, step = nothing)
     else
         compute_power_used = compute_power
     end
+
+    compute_left_after = compute_left
 
     #normalizing
     compute_power_used *= 100/n_turbines
@@ -344,23 +355,32 @@ function calculate_day(action, env, step = nothing)
         compute_power_used *= (n_turbines * 0.01)
         
         reward1 = compute_power_used * grid_price[step-1]
-        reward = - reward1 * reward_scale_factor
+        reward = - reward1
 
         if !isnothing(env) 
             if (env.time + env.dt) >= env.te 
-                reward -= compute_left * 1.0  * reward_scale_factor
+                reward -= compute_left * 1.0
+                compute_left_after = 0
             end
         end
+    end
+
+    if reward_shaping
+        # potential based reward shaping
+        beta = 0.5
+        reward += beta * (compute_left_before - compute_left_after - (gamma-1) * compute_left_after)
+
+        reward *= reward_scale_factor
     end
 
     return reward, compute_left
 end
 
 
-function do_step(env)
+function do_step(env; reward_shaping = true)
     global wind_only
     
-    reward, compute_left = calculate_day(env.p, env)
+    reward, compute_left = calculate_day(env.p, env; reward_shaping = reward_shaping)
 
     #env.reward = [ -(reward^2)]
     env.reward = [reward]
@@ -443,7 +463,8 @@ function initialize_setup(;use_random_init = false)
                 start_logσ = start_logσ,
                 tanh_end = tanh_end,
                 betas = betas,
-                automatic_entropy_tuning = automatic_entropy_tuning)
+                automatic_entropy_tuning = automatic_entropy_tuning,
+                target_entropy = target_entropy,)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -468,7 +489,7 @@ initialize_setup()
 
 
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimal_trainings  = 0, outer_loops = 3360, only_wind_steps = 0)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 13360, only_wind_steps = 0, json = false)
     global wind_only, optimal_trajectory
     wind_only = false
     
@@ -496,6 +517,8 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
         fill_optimal_trajectory()
     end
     
+    global logs = []
+    global validation_scores = []
 
     for j = 1:outer_loops
 
@@ -600,6 +623,21 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
                 if is_terminated(env)
                     agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
                     hook(POST_EPISODE_STAGE, agent, env)
+
+                    if json
+                        push!(logs, Dict(
+                            "episode" => length(hook.rewards),
+                            "reward_ep" => hook.rewards[end],
+                            "actor_loss" => agent.policy.last_actor_loss,
+                            "critic1_loss" => agent.policy.last_critic1_loss,
+                            "critic2_loss" => agent.policy.last_critic2_loss,
+                            "log_alpha" => agent.policy.log_α[1],
+                            "q1_mean" => agent.policy.last_q1_mean,
+                            "q2_mean" => agent.policy.last_q2_mean,
+                            "target_q_mean" => agent.policy.last_target_q_mean,
+                            "mean_minus_log_pi" => agent.policy.last_mean_minus_log_pi,
+                        ))
+                    end
                 end
             end
             hook(POST_EXPERIMENT_STAGE, agent, env)
@@ -607,6 +645,14 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
 
             println(hook.bestreward)
+
+            if @isdefined(validate_agent)
+                push!(validation_scores, mean(validate_agent()))
+            end
+
+            if !isempty(validation_scores)
+                println(lineplot(validation_scores, title="Validation scores", xlabel="Episode", ylabel="Score", color=:cyan))
+            end
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
 
@@ -662,7 +708,7 @@ end
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, plot_values = false, plot_critic2 = false, critic2_diagnostics = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, plot_values = false, plot_critic2 = false, critic2_diagnostics = false, json = false)
     global history_steps
 
     if show_training_episode
@@ -707,6 +753,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     reset!(env)
     generate_random_init()
 
+    global run_logs = []
+
     while !env.done
 
         if exploration
@@ -717,14 +765,29 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         
 
         #action = agent(env)
+        step_dict = Dict()
 
         push!(q1, agent.policy.qnetwork1(vcat(env.state, action))[1])
         push!(q2, agent.policy.qnetwork2(vcat(env.state, action))[1])
+
+        if json
+            step_dict["step"] = env.steps
+            step_dict["state"] = env.state
+            step_dict["action"] = action
+            step_dict["q1"] = q1[end]
+            step_dict["q2"] = q2[end]
+        end
 
         env(action)
 
         push!(terminals, env.done)
 
+        if json
+            step_dict["next_state"] = env.state
+            step_dict["terminated"] = env.done
+            step_dict["reward"] = env.reward[1]
+            push!(run_logs, step_dict)
+        end
 
         for k in 1:n_windCORES
             push!(results["hpc$k"], clamp((action[1]+1)*0.5, 0, 1)) #env.p[k])
@@ -960,7 +1023,7 @@ function evaluate(actions; collect_rewards = false)
 
     for t in 1:Int(te/dt)
 
-        reward, _ = calculate_day(actions[:,t], nothing, t-1)
+        reward, _ = calculate_day(actions[:,t], nothing, t-1; reward_shaping = false)
 
         reward_sum += reward
 
