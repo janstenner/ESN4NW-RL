@@ -223,7 +223,7 @@ t = 0.008f0
 target_entropy = -0.8
 
 
-learning_rate = 7e-5
+learning_rate = 3e-4
 trajectory_length = 1_000_000
 batch_size = 256
 update_after = 200_000
@@ -491,6 +491,77 @@ function generate_random_init()
 end
 
 initialize_setup()
+
+
+
+
+
+function fill_optimal_trajectory(; steps = 4000)
+    global optimal_trajectory, optimal_episodes, env, action_dim
+
+    if isnothing(optimal_trajectory)
+        n_envs = 1
+        optimal_trajectory = CircularArrayTrajectory(;
+                capacity = Int(te / dt) * optimal_episodes, # fit all episodes
+                state = Float32 => (size(env.state_space)[1], n_envs),
+                action = Float32 => (size(env.action_space)[1], n_envs),
+                reward = Float32 => (n_envs),
+                terminal = Bool => (n_envs,),
+        )
+    end
+
+    global optimal_rewards = Float64[]
+
+    for i in 1:optimal_episodes
+
+            # run start
+            println("Optimized Episode $(i)...")
+            reset!(env)
+
+            generate_random_init()
+
+            # generate optimal actions
+            optimal_actions = optimize_day(steps; verbose = false)
+            n = 1
+
+            episode_rewards = Float64[]
+
+            while !is_terminated(env) # one episode
+
+                if n <= size(optimal_actions)[2]
+                    # hcat for transforming vectors to matrices
+                    action = hcat(optimal_actions[:,n])
+                else
+                    # just in case y[1] is not exactly 0.0 due to numerical errors
+                    action = 0.001 .* ones(action_dim,1)
+                end
+
+
+                push!(
+                    optimal_trajectory;
+                    state=env.state,
+                    action=action,
+                )
+
+                env(action)
+
+                r = reward(env)[:]
+
+                push!(episode_rewards, r[1])
+
+                push!(optimal_trajectory[:reward], r)
+                push!(optimal_trajectory[:terminal], is_terminated(env))
+
+
+                n += 1
+            end # end of an episode
+
+            push!(optimal_rewards, sum(episode_rewards))
+        end
+
+end
+
+
 
 
 
