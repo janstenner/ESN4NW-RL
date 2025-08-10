@@ -207,7 +207,7 @@ nna_scale = 1.6
 nna_scale_critic = 0.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
-fun = gelu
+fun = leakyrelu
 logσ_is_network = true
 tanh_end = false
 use_gpu = false
@@ -216,20 +216,20 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.997f0
+y = 0.9997f0
 gamma = y
 a = 0.2f0
-t = 0.005f0
-target_entropy = -1.0
+t = 0.008f0
+target_entropy = -0.8
 
 
-learning_rate = 6e-4
+learning_rate = 7e-5
 trajectory_length = 1_000_000
 batch_size = 256
-update_after = 1_000
+update_after = 200_000
 update_freq = 10
 update_loops = 3
-clip_grad = 0.8
+clip_grad = 0.3
 start_logσ = -1.5
 automatic_entropy_tuning = true
 
@@ -238,6 +238,11 @@ betas = (0.8, 0.98)
 
 
 wind_only = false
+
+
+include("./../Validation_Minimal1.jl")
+
+
 
 
 
@@ -519,6 +524,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
     
     global logs = []
     global validation_scores = []
+    global agent_save = nothing
 
     for j = 1:outer_loops
 
@@ -647,7 +653,13 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             println(hook.bestreward)
 
             if @isdefined(validate_agent)
-                push!(validation_scores, mean(validate_agent()))
+                current_score = mean(validate_agent())
+
+                if !isempty(validation_scores) && current_score > maximum(validation_scores)
+                    agent_save = deepcopy(agent)
+                end
+                
+                push!(validation_scores, current_score)
             end
 
             if !isempty(validation_scores)
@@ -1015,7 +1027,7 @@ end
 
 # sum(actions) has to be 100
 
-function evaluate(actions; collect_rewards = false)
+function evaluate(actions; collect_rewards = false, reward_shaping = false)
     step = 2
 
     reward_sum = 0.0
@@ -1023,7 +1035,7 @@ function evaluate(actions; collect_rewards = false)
 
     for t in 1:Int(te/dt)
 
-        reward, _ = calculate_day(actions[:,t], nothing, t-1; reward_shaping = false)
+        reward, _ = calculate_day(actions[:,t], nothing, t-1; reward_shaping = reward_shaping)
 
         reward_sum += reward
 

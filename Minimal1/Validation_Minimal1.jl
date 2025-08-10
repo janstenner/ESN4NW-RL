@@ -8,14 +8,17 @@ global validation_results = FileIO.load("./Minimal1/validation_results.jld2","va
 #FileIO.save("./Minimal1/validation_results.jld2","validation_results",validation_results)
 
 
-traces = AbstractTrace[]
+function plot_validation_results()
+    traces = AbstractTrace[]
 
-for (key, value) in validation_results
-    trace = box(y=value, name=key, boxpoints="all", quartilemethod="linear")
-    push!(traces, trace)
+    for (key, value) in validation_results
+        trace = box(y=value, name=key, boxpoints="all", quartilemethod="linear")
+        push!(traces, trace)
+    end
+
+    p = plot(traces)
+    display(p)
 end
-
-plot(traces)
 
 # data = [1,2,3,4,5,6,7,8,9]
 # trace1 = box(y=data, boxpoints="all", quartilemethod="linear", name="linear")
