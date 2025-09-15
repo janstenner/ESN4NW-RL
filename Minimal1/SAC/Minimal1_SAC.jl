@@ -203,11 +203,11 @@ sim_space = Space(fill(0..1, (state_dim)))
 
 
 # agent tuning parameters
-nna_scale = 1.6
-nna_scale_critic = 0.8
+nna_scale = 6.4
+nna_scale_critic = 3.2
 drop_middle_layer = false
 drop_middle_layer_critic = false
-fun = leakyrelu
+fun = gelu
 logσ_is_network = true
 tanh_end = false
 use_gpu = false
@@ -216,11 +216,11 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.9997f0
+y = 0.99f0
 gamma = y
-a = 0.2f0
-t = 0.008f0
-target_entropy = -0.8
+a = 3f-4 #0.2f0
+t = 0.005f0
+target_entropy = -1.0
 
 
 learning_rate = 3e-4
@@ -229,11 +229,10 @@ batch_size = 256
 update_after = 200_000
 update_freq = 10
 update_loops = 3
-clip_grad = 0.3
+clip_grad = 0.5
 start_logσ = -1.5
 automatic_entropy_tuning = true
 
-betas = (0.8, 0.98)
 
 
 
@@ -252,6 +251,42 @@ if !isdefined(Main, :optimal_trajectory)
     optimal_trajectory = nothing
 end
 
+
+
+function temp()
+    inds, batch = pde_sample(rng, agent.trajectory, BatchSampler{SARTS}(1), 1)
+    p = agent.policy;
+    γ, τ, α = p.γ, p.τ, p.α
+
+    # for (dest, src) in zip(
+    #     Flux.params([p.target_qnetwork1, p.target_qnetwork2]),
+    #     Flux.params([p.qnetwork1, p.qnetwork2]),
+    # )
+    #     dest .= (1 - τ) .* dest .+ τ .* src
+    # end
+
+    # p.target_qnetwork1[end].μ = (1 - τ) .* p.target_qnetwork1[end].μ .+ τ .* p.qnetwork1[end].μ
+    # p.target_qnetwork1[end].σ = (1 - τ) .* p.target_qnetwork1[end].σ .+ τ .* p.qnetwork1[end].σ
+    # p.target_qnetwork2[end].μ = (1 - τ) .* p.target_qnetwork2[end].μ .+ τ .* p.qnetwork2[end].μ
+    # p.target_qnetwork2[end].σ = (1 - τ) .* p.target_qnetwork2[end].σ .+ τ .* p.qnetwork2[end].σ
+
+    s, a, r, t, s′ = batch
+
+    a′, log_π′ = p.actor(p.device_rng, s′; is_sampling=true, is_return_log_prob=true)
+    q′_input = vcat(s′, a′)
+    q′ = min.(p.target_qnetwork1(q′_input), p.target_qnetwork2(q′_input))
+
+    y = r .+ γ .* (1 .- t) .* dropdims(q′ .- α .* log_π′, dims=1)
+
+    q_input = vcat(s,a)
+    q = min.(p.qnetwork1(q_input), p.qnetwork2(q_input))
+    q2 = min.(p.target_qnetwork1(q_input), p.target_qnetwork2(q_input))
+
+    println("q′: $(q′)")
+    println("y: $(y)")
+    println("q: $(q)")
+    println("q2: $(q2)")
+end
 
 
 
@@ -372,7 +407,7 @@ function calculate_day(action, env, step = nothing; reward_shaping = true)
 
     if reward_shaping
         # potential based reward shaping
-        beta = 0.5
+        beta = 1.0
         reward += beta * (compute_left_before - compute_left_after - (gamma-1) * compute_left_after)
 
         reward *= reward_scale_factor
@@ -467,7 +502,6 @@ function initialize_setup(;use_random_init = false)
                 clip_grad = clip_grad,
                 start_logσ = start_logσ,
                 tanh_end = tanh_end,
-                betas = betas,
                 automatic_entropy_tuning = automatic_entropy_tuning,
                 target_entropy = target_entropy,)
 
