@@ -4,3 +4,5 @@ frames/*
 video_output/*
 
 .vscode/*
+
+training_results.jld2

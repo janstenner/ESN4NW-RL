@@ -599,7 +599,7 @@ end
 
 
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 13360, only_wind_steps = 0, json = false)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 160, only_wind_steps = 0, json = false)
     global wind_only, optimal_trajectory
     wind_only = false
     
@@ -797,7 +797,7 @@ end
 #train(;visuals = true, num_steps = 70)
 
 
-function load(number = nothing)
+function load_agent(number = nothing)
     if isnothing(number)
         global hook = FileIO.load(dirpath * "/saves/hook.jld2","hook")
         global agent = FileIO.load(dirpath * "/saves/agent.jld2","agent")
@@ -809,7 +809,7 @@ function load(number = nothing)
     end
 end
 
-function save(number = nothing)
+function save_agent(number = nothing)
     isdir(dirpath * "/saves") || mkdir(dirpath * "/saves")
 
     if isnothing(number)
@@ -855,11 +855,11 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
     xx = collect(dt/60:dt/60:te/60)
 
-    global results = Dict("rewards" => [], "loadleft" => [])
+    global results_run = Dict("rewards" => [], "loadleft" => [])
 
     for k in 1:n_windCORES
-        results["hpc$k"] = []
-        results["σ$k"] = []
+        results_run["hpc$k"] = []
+        results_run["σ$k"] = []
     end
 
     q1 = []
@@ -907,11 +907,11 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         end
 
         for k in 1:n_windCORES
-            push!(results["hpc$k"], clamp((action[1]+1)*0.5, 0, 1)) #env.p[k])
-            #push!(results["σ$k"], σ[k])
+            push!(results_run["hpc$k"], clamp((action[1]+1)*0.5, 0, 1)) #env.p[k])
+            #push!(results_run["σ$k"], σ[k])
         end
-        push!(results["rewards"], env.reward[1])
-        push!(results["loadleft"], env.y[1])
+        push!(results_run["rewards"], env.reward[1])
+        push!(results_run["loadleft"], env.y[1])
 
         # println(mean(env.reward))
 
@@ -966,10 +966,10 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     
     if show_σ
         for k in 1:n_windCORES
-            push!(to_plot, scatter(x=xx, y=results["σ$k"], name="σ$k", yaxis = "y2"))
+            push!(to_plot, scatter(x=xx, y=results_run["σ$k"], name="σ$k", yaxis = "y2"))
         end
     else
-        push!(to_plot, scatter(x=xx, y=results["rewards"], name="Reward", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
     end
 
     if plot_values
@@ -977,12 +977,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         push!(to_plot, scatter(x=xx, y=q2, name="q2", yaxis = "y2"))
     end
 
-    push!(to_plot, scatter(x=xx, y=results["loadleft"], name="Load Left"))
+    push!(to_plot, scatter(x=xx, y=results_run["loadleft"], name="Load Left"))
     push!(to_plot, scatter(x=xx, y=grid_price[history_steps:end], name="Grid Price"))
 
 
     for k in 1:n_windCORES
-        push!(to_plot, scatter(x=xx, y=results["hpc$k"], name="WindCORE utilization $k"))
+        push!(to_plot, scatter(x=xx, y=results_run["hpc$k"], name="WindCORE utilization $k"))
         #line=attr(color = "rgba(200, 200, 200, 0.3)")))
     end
 
@@ -1062,7 +1062,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             states = new_states
         end
 
-        results = zeros(Float32, length(actions), length(states))
+        results_critic2 = zeros(Float32, length(actions), length(states))
 
         for (i,state) in enumerate(states)
             inputs = vcat(repeat(state, 1, length(actions)), actions')
@@ -1073,28 +1073,28 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
             critic2_values = agent.policy.approximator.critic2(inputs)[:] #-1 first
 
-            results[:,i] = critic2_values - mu_values
+            results_critic2[:,i] = critic2_values - mu_values
         end
 
-        results = (results .- mean(results)) ./ clamp(std(results), 1e-8, 1000.0)
+        results_critic2 = (results_critic2 .- mean(results_critic2)) ./ clamp(std(results_critic2), 1e-8, 1000.0)
 
-        min_val = - maximum(abs.(results))
+        min_val = - maximum(abs.(results_critic2))
 
         for (i,state) in enumerate(states)
 
             if critic2_diagnostics
                 idx = clamp(searchsortedfirst(actions, state[end-1] * 2 - 1), 1, length(actions))
 
-                idx2 = findmax(results[:,i])[2]
-                results[idx2,i] = -min_val
+                idx2 = findmax(results_critic2[:,i])[2]
+                results_critic2[idx2,i] = -min_val
             else
                 idx = clamp(searchsortedfirst(actions, mus[i]), 1, length(actions))
             end
 
-            results[idx,i] = min_val
+            results_critic2[idx,i] = min_val
         end
 
-        display(plot(heatmap(x = xx, y = actions, z=results, coloraxis="coloraxis"), layout))
+        display(plot(heatmap(x = xx, y = actions, z=results_critic2, coloraxis="coloraxis"), layout))
 
     end
 end
