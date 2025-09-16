@@ -1,5 +1,7 @@
 using JLD2
 using FileIO
+using PlotlyJS
+using Statistics
 
 # File path for saving results
 results_file = "training_results.jld2"
@@ -9,7 +11,8 @@ if isfile(results_file)
     results = FileIO.load(results_file, "results")
     println("Loaded existing results file")
 else
-    results = Dict{String, Dict{String, Dict{Int, Dict{String, Any}}}}()
+    # Now we have another level in the hierarchy for reward_shaping
+    results = Dict{String, Dict{String, Dict{String, Dict{Int, Dict{String, Any}}}}}()
     println("Created new results dictionary")
     FileIO.save(results_file, "results", results)
 end
@@ -23,12 +26,15 @@ algorithms = [
 ]
 
 # Function to ensure nested dictionary structure exists
-function ensure_nested_dict!(results, alg_name, il_type)
+function ensure_nested_dict!(results, alg_name, il_type, reward_shaping)
     if !haskey(results, alg_name)
-        results[alg_name] = Dict{String, Dict{Int, Dict{String, Any}}}()
+        results[alg_name] = Dict{String, Dict{String, Dict{Int, Dict{String, Any}}}}()
     end
     if !haskey(results[alg_name], il_type)
-        results[alg_name][il_type] = Dict{Int, Dict{String, Any}}()
+        results[alg_name][il_type] = Dict{String, Dict{Int, Dict{String, Any}}}()
+    end
+    if !haskey(results[alg_name][il_type], reward_shaping)
+        results[alg_name][il_type][reward_shaping] = Dict{Int, Dict{String, Any}}()
     end
 end
 
@@ -37,44 +43,38 @@ function collect_runs(n = 5)
     for (alg_name, script_path) in algorithms
         println("\n=== Testing $alg_name ===")
         
-        # First run without IL
-        println("\nRunning without Imitation Learning:")
-        ensure_nested_dict!(results, alg_name, "no_IL")
-        
-        for i in 1:n
-            println("\nStarting training run $i")
-            global seed = i
-            include(script_path)
-            train()
-            
-            results[alg_name]["no_IL"][seed] = Dict(
-                "agent_save" => agent_save,
-                "agent" => agent,
-                "rewards" => hook.rewards
-            )
-            
-            FileIO.save(results_file, "results", results)
-            println("Saved results for $alg_name (no IL) with seed $seed")
-        end
-        
-        # Then run with IL
-        println("\nRunning with Imitation Learning:")
-        ensure_nested_dict!(results, alg_name, "IL")
-        
-        for i in 1:5
-            println("\nStarting training run $i")
-            global seed = i
-            include(script_path)
-            train(;optimal_trainings=80)
-            
-            results[alg_name]["IL"][seed] = Dict(
-                "agent_save" => agent_save,
-                "agent" => agent,
-                "rewards" => hook.rewards
-            )
-            
-            FileIO.save(results_file, "results", results)
-            println("Saved results for $alg_name (with IL) with seed $seed")
+        # Run all combinations of IL and reward_shaping
+        for il_type in ["no_IL", "IL"]
+            for rs_type in ["with_RS", "no_RS"]
+                println("\nRunning $(il_type) with $(rs_type):")
+                ensure_nested_dict!(results, alg_name, il_type, rs_type)
+                
+                for i in 1:n
+                    println("\nStarting training run $i")
+                    global seed = i
+                    include(script_path)
+                    
+                    # Set appropriate training parameters
+                    train_params = Dict()
+                    if il_type == "IL"
+                        train_params[:optimal_trainings] = 80
+                    end
+                    train_params[:reward_shaping] = (rs_type == "with_RS")
+                    
+                    # Run training with parameters
+                    train(;train_params...)
+                    
+                    # Store results
+                    results[alg_name][il_type][rs_type][seed] = Dict(
+                        "agent_save" => agent_save,
+                        "agent" => agent,
+                        "rewards" => hook.rewards
+                    )
+                    
+                    FileIO.save(results_file, "results", results)
+                    println("Saved results for $alg_name ($il_type, $rs_type) with seed $seed")
+                end
+            end
         end
     end
 
@@ -102,29 +102,42 @@ function plot_validation_comparison()
     optimal_scores = validate_agent(optimizer = true)
     
     # Initialize dictionary to store all validation results
-    validation_results = Dict{String, Vector{Float32}}()
-    validation_results["Optimal"] = optimal_scores
+    best_validation_results = Dict{String, Vector{Float32}}()
+    best_validation_results["Optimal"] = optimal_scores
     
     # Go through all results and validate each agent
     for alg_name in keys(results)
         for il_type in keys(results[alg_name])
-            for seed in keys(results[alg_name][il_type])
-                # Set the global agent to the saved agent
-                global agent = results[alg_name][il_type][seed]["agent_save"]
+            for rs_type in keys(results[alg_name][il_type])
+                # Collect scores for all seeds of this configuration
+                config_scores = Dict{Int, Vector{Float32}}()
+                config_means = Dict{Int, Float64}()
                 
-                # Skip if agent is nothing (sometimes happens if training wasn't successful)
-                if isnothing(agent)
-                    println("Skipping $(alg_name)-$(il_type)-seed$(seed) (no agent saved)")
-                    continue
+                for seed in keys(results[alg_name][il_type][rs_type])
+                    # Set the global agent to the saved agent
+                    global agent = results[alg_name][il_type][rs_type][seed]["agent_save"]
+                    
+                    # Skip if agent is nothing
+                    if isnothing(agent)
+                        println("Skipping $(alg_name)-$(il_type)-$(rs_type)-seed$(seed) (no agent saved)")
+                        continue
+                    end
+                    
+                    # Run validation
+                    println("Validating $(alg_name)-$(il_type)-$(rs_type)-seed$(seed)...")
+                    scores = validate_agent()
+                    
+                    # Store scores and mean
+                    config_scores[seed] = scores
+                    config_means[seed] = mean(scores)
                 end
                 
-                # Run validation
-                println("Validating $(alg_name)-$(il_type)-seed$(seed)...")
-                scores = validate_agent()
-                
-                # Store results with descriptive key
-                key = "$(alg_name)-$(il_type)-s$(seed)"
-                validation_results[key] = scores
+                # Find the best seed based on mean score
+                if !isempty(config_means)
+                    best_seed = argmax(config_means)
+                    key = "$(alg_name)-$(il_type)-$(rs_type)"
+                    best_validation_results[key] = config_scores[best_seed]
+                end
             end
         end
     end
@@ -142,34 +155,35 @@ function plot_validation_comparison()
     ))
     
     # Add all other results
-    for (key, value) in sort(collect(validation_results))
+    for (key, value) in sort(collect(best_validation_results))
         if key != "Optimal"
-            # Extract algorithm and IL type for coloring
-            alg = split(key, "-")[1]
-            il_type = split(key, "-")[2]
+            # Extract algorithm, IL type and RS type for coloring
+            parts = split(key, "-")
+            alg = parts[1]
+            il_type = parts[2]
+            rs_type = parts[3]
             
-            # Choose color based on algorithm and IL type
-            color = if il_type == "IL"
-                if alg == "SAC"
-                    "rgb(255, 100, 100)"  # Light red
-                elseif alg == "PPO"
-                    "rgb(100, 100, 255)"  # Light blue
-                elseif alg == "PPO2"
-                    "rgb(100, 255, 100)"  # Light green
-                else  # DDPG
-                    "rgb(255, 100, 255)"  # Light purple
-                end
-            else  # no_IL
-                if alg == "SAC"
-                    "rgb(200, 0, 0)"  # Dark red
-                elseif alg == "PPO"
-                    "rgb(0, 0, 200)"  # Dark blue
-                elseif alg == "PPO2"
-                    "rgb(0, 200, 0)"  # Dark green
-                else  # DDPG
-                    "rgb(200, 0, 200)"  # Dark purple
-                end
+            # Choose color based on algorithm, IL type, and RS type
+            base_color = if alg == "SAC"
+                [255, 0, 0]  # Red base
+            elseif alg == "PPO"
+                [0, 0, 255]  # Blue base
+            elseif alg == "PPO2"
+                [0, 255, 0]  # Green base
+            else  # DDPG
+                [255, 0, 255]  # Purple base
             end
+            
+            # Modify color based on IL and RS
+            if il_type == "IL"
+                base_color = base_color .* 0.8 .+ (255 * 0.2)  # Lighter
+            end
+            
+            if rs_type == "with_RS"
+                base_color = base_color .* 0.9  # Slightly darker
+            end
+            
+            color = "rgb($(round(Int, base_color[1])), $(round(Int, base_color[2])), $(round(Int, base_color[3])))"
             
             push!(traces, box(
                 y=value,
@@ -202,4 +216,3 @@ function plot_validation_comparison()
     
     return p  # Return the plot object in case it's needed
 end
-

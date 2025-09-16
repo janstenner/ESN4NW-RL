@@ -530,19 +530,18 @@ initialize_setup()
 
 
 
-function fill_optimal_trajectory(; steps = 4000)
+function fill_optimal_trajectory(; steps = 4000, reward_shaping = true)
     global optimal_trajectory, optimal_episodes, env, action_dim
 
-    if isnothing(optimal_trajectory)
-        n_envs = 1
-        optimal_trajectory = CircularArrayTrajectory(;
-                capacity = Int(te / dt) * optimal_episodes, # fit all episodes
-                state = Float32 => (size(env.state_space)[1], n_envs),
-                action = Float32 => (size(env.action_space)[1], n_envs),
-                reward = Float32 => (n_envs),
-                terminal = Bool => (n_envs,),
-        )
-    end
+    
+    n_envs = 1
+    optimal_trajectory = CircularArrayTrajectory(;
+            capacity = Int(te / dt) * optimal_episodes, # fit all episodes
+            state = Float32 => (size(env.state_space)[1], n_envs),
+            action = Float32 => (size(env.action_space)[1], n_envs),
+            reward = Float32 => (n_envs),
+            terminal = Bool => (n_envs,),
+    )
 
     global optimal_rewards = Float64[]
 
@@ -577,7 +576,7 @@ function fill_optimal_trajectory(; steps = 4000)
                     action=action,
                 )
 
-                env(action)
+                env(action; reward_shaping = reward_shaping)
 
                 r = reward(env)[:]
 
@@ -599,7 +598,7 @@ end
 
 
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 260, only_wind_steps = 0, json = false)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 260, only_wind_steps = 0, json = false, reward_shaping = true)
     global wind_only, optimal_trajectory
     wind_only = false
     
@@ -623,8 +622,8 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
     end
 
 
-    if optimal_trainings > 0 &&  isnothing(optimal_trajectory)
-        fill_optimal_trajectory()
+    if optimal_trainings > 0
+        fill_optimal_trajectory(; reward_shaping = reward_shaping)
     end
     
     global logs = []
@@ -712,7 +711,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
                     agent(PRE_ACT_STAGE, env, action)
                     hook(PRE_ACT_STAGE, agent, env, action)
 
-                    env(action)
+                    env(action; reward_shaping = reward_shaping)
 
                     agent(POST_ACT_STAGE, env)
                     hook(POST_ACT_STAGE, agent, env)
