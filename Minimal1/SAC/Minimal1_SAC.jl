@@ -400,7 +400,7 @@ function calculate_day(action, env, step = nothing; reward_shaping = true)
         if !isnothing(env) 
             if (env.time + env.dt) >= env.te 
                 reward -= compute_left * 1.0
-                compute_left_after = 0
+                compute_left_after = 0.0f0 
             end
         end
     end
@@ -413,7 +413,7 @@ function calculate_day(action, env, step = nothing; reward_shaping = true)
         reward *= reward_scale_factor
     end
 
-    return reward, compute_left
+    return reward, compute_left_after
 end
 
 
@@ -530,7 +530,7 @@ initialize_setup()
 
 
 
-function fill_optimal_trajectory(; steps = 4000, reward_shaping = true)
+function fill_optimal_trajectory(; steps = 4000)
     global optimal_trajectory, optimal_episodes, env, action_dim
 
     
@@ -576,9 +576,18 @@ function fill_optimal_trajectory(; steps = 4000, reward_shaping = true)
                     action=action,
                 )
 
-                env(action; reward_shaping = reward_shaping)
+                compute_left_before = env.y[1]
+                
+                env(action; reward_shaping = false)
 
+                
                 r = reward(env)[:]
+
+                beta = 1.0
+                reward_scale_factor = 100
+                compute_left_after = env.y[1]
+                r_shaped .+= beta * (compute_left_before - compute_left_after - (gamma-1) * compute_left_after)
+                r_shaped .*= reward_scale_factor
 
                 push!(episode_rewards, r[1])
 
