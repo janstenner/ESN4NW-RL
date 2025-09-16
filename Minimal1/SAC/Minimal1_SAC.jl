@@ -599,7 +599,7 @@ end
 
 
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 160, only_wind_steps = 0, json = false)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 260, only_wind_steps = 0, json = false)
     global wind_only, optimal_trajectory
     wind_only = false
     
