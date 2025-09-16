@@ -56,7 +56,7 @@ function generate_optimal_trajectories(; steps = 10_000)
         action_log_prob = Float32 => (n_envs),
         reward = Float32 => (n_envs),
         terminal = Bool => (n_envs,),
-        next_values = Float32 => (1, n_envs),
+        next_state = Float32 => (size(env.state_space)[1], n_envs),
     )
     
     ppo_trajectory_rs = CircularArrayTrajectory(;
@@ -66,7 +66,7 @@ function generate_optimal_trajectories(; steps = 10_000)
         action_log_prob = Float32 => (n_envs),
         reward = Float32 => (n_envs),
         terminal = Bool => (n_envs,),
-        next_values = Float32 => (1, n_envs),
+        next_state = Float32 => (size(env.state_space)[1], n_envs),
     )
 
     # PPO2 trajectory
@@ -78,7 +78,7 @@ function generate_optimal_trajectories(; steps = 10_000)
         reward = Float32 => (n_envs),
         explore_mod = Float32 => (n_envs),
         terminal = Bool => (n_envs,),
-        next_values = Float32 => (1, n_envs)
+        next_state = Float32 => (size(env.state_space)[1], n_envs),
     )
     
     ppo2_trajectory_rs = CircularArrayTrajectory(;
@@ -89,7 +89,7 @@ function generate_optimal_trajectories(; steps = 10_000)
         reward = Float32 => (n_envs),
         explore_mod = Float32 => (n_envs),
         terminal = Bool => (n_envs,),
-        next_values = Float32 => (1, n_envs)
+        next_state = Float32 => (size(env.state_space)[1], n_envs),
     )
 
     global optimal_rewards = Float64[]
@@ -170,16 +170,16 @@ function generate_optimal_trajectories(; steps = 10_000)
             push!(ppo_trajectory_rs[:reward], [r_shaped])
             push!(ppo_trajectory_no_rs[:terminal], is_terminated(env))
             push!(ppo_trajectory_rs[:terminal], is_terminated(env))
-            push!(ppo_trajectory_no_rs[:next_values], agent.policy.approximator.critic(env.state))
-            push!(ppo_trajectory_rs[:next_values], agent.policy.approximator.critic(env.state))
+            push!(ppo_trajectory_no_rs[:next_state], env.state)
+            push!(ppo_trajectory_rs[:next_state], env.state)
 
             # PPO2
             push!(ppo2_trajectory_no_rs[:reward], [r])
             push!(ppo2_trajectory_rs[:reward], [r_shaped])
             push!(ppo2_trajectory_no_rs[:terminal], is_terminated(env))
             push!(ppo2_trajectory_rs[:terminal], is_terminated(env))
-            push!(ppo2_trajectory_no_rs[:next_values], agent.policy.approximator.critic(env.state))
-            push!(ppo2_trajectory_rs[:next_values], agent.policy.approximator.critic(env.state))
+            push!(ppo2_trajectory_no_rs[:next_state], env.state)
+            push!(ppo2_trajectory_rs[:next_state], env.state)
 
             n += 1
         end
