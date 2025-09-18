@@ -58,6 +58,8 @@ function validate_agent(; optimizer = false)
                     action = agent.policy.actor.μ(env.state)
                 elseif hasproperty(agent.policy, :approximator)
                     action = agent.policy.approximator.actor.μ(env.state)
+                elseif hasproperty(agent.policy, :behavior_actor)
+                    action = agent.policy.behavior_actor(env.state)
                 end
                 
                 env(action; reward_shaping = false)

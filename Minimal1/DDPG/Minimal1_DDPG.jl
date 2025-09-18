@@ -87,8 +87,6 @@ function initialize_setup(;use_random_init = false)
                 te = te, t0 = t0, dt = dt, 
                 sim_space = sim_space, 
                 action_space = actionspace,
-                oversampling = 1,
-                use_radau = false,
                 max_value = 1.0,
                 check_max_value = "nothing")
 
