@@ -41,31 +41,33 @@ gpu_env = false
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 3.5
-nna_scale_critic = 5.0
+nna_scale = 6.4
+nna_scale_critic = 3.2
 drop_middle_layer = false
 drop_middle_layer_critic = false
-fun = leakyrelu
+fun = gelu
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
 
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.95f0
+y = 0.99f0
+gamma = y
 p = 0.995f0
-batch_size = 10
+batch_size = 256
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
-update_after = 10
-update_freq = 1
-update_loops = 10
+update_after = 200_000
+update_freq = 10
+update_loops = 3
 reset_stage = POST_EPISODE_STAGE
-learning_rate = 0.0002
-learning_rate_critic = 0.0005
+learning_rate = 3e-4
+learning_rate_critic = 3e-4
+clip_grad = 0.5
 act_limit = 1.0
-act_noise = 1.2
-trajectory_length = 500_000
+act_noise = 0.1
+trajectory_length = 1_000_000
 
 
 
@@ -90,6 +92,7 @@ function initialize_setup(;use_random_init = false)
                 max_value = 1.0,
                 check_max_value = "nothing")
 
+
     global agent = create_agent(mono = true,
                         action_space = actionspace,
                         state_space = env.state_space,
@@ -112,11 +115,14 @@ function initialize_setup(;use_random_init = false)
                         memory_size = memory_size,
                         trajectory_length = trajectory_length,
                         learning_rate = learning_rate,
-                        learning_rate_critic = learning_rate_critic)
+                        learning_rate_critic = learning_rate_critic,
+                        clip_grad = clip_grad,)
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
+                            collect_NNA = false,
                             generate_random_init = generate_random_init,
-                            collect_history = true,
+                            collect_history = false,
+                            collect_rewards_all_timesteps = false,
                             early_success_possible = true)
 end
 
@@ -131,13 +137,11 @@ optimal_trajectory = trajectories["SAC_DDPG"]["with_RS"]
 
 
 
-function render_run(use_best = false)
+function render_run(use_best = false; exploration = true)
     if use_best
         copyto!(agent.policy.behavior_actor, hook.bestNNA)
     end
 
-    temp_noise = agent.policy.act_noise
-    agent.policy.act_noise = 0.0
 
     temp_start_steps = agent.policy.start_steps
     agent.policy.start_steps  = -1
@@ -163,7 +167,11 @@ function render_run(use_best = false)
     generate_random_init()
 
     while !env.done
-        action = agent(env)
+        if exploration
+            action = agent(env)
+        else
+            action = agent.policy.behavior_actor(env)
+        end
 
         #action = env.y[6] < 0.27 ? [-1.0] : [1.0]
 
@@ -194,7 +202,6 @@ function render_run(use_best = false)
     end
 
     agent.policy.start_steps = temp_start_steps
-    agent.policy.act_noise = temp_noise
     agent.policy.update_after = temp_update_after
 
     println(reward_sum)
@@ -218,6 +225,8 @@ function render_run(use_best = false)
         push!(to_plot, scatter(y=results_run["hpc$k"], name="hpc$k"))
         push!(to_plot, scatter(y=wind[k], name="wind$k"))
     end
-    plot(Vector{AbstractTrace}(to_plot), layout)
+    p = plot(Vector{AbstractTrace}(to_plot), layout)
+
+    display(p)
 
 end

@@ -60,9 +60,9 @@ function collect_runs(n = 5)
                     # Algorithm-specific default parameters
                     default_params = Dict(
                         "SAC" => Dict(
-                            "inner_loops" => 10,
+                            "inner_loops" => 1,
                             "outer_loops" => 100,
-                            "optimal_trainings" => 80,
+                            "optimal_trainings" => 1000,
                             "num_steps" => 10_000
                         ),
                         "PPO" => Dict(
@@ -78,9 +78,9 @@ function collect_runs(n = 5)
                             "num_steps" => 10_000
                         ),
                         "DDPG" => Dict(
-                            "inner_loops" => 10,
+                            "inner_loops" => 1,
                             "outer_loops" => 100,
-                            "optimal_trainings" => 80,
+                            "optimal_trainings" => 1000,
                             "num_steps" => 10_000
                         )
                     )

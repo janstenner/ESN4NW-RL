@@ -365,7 +365,7 @@ function generate_random_init()
 end
 
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 5, only_wind_steps = 0, json = false, reward_shaping = true, plot_runs = true)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 500, only_wind_steps = 0, json = false, reward_shaping = true, plot_runs = true)
     global wind_only, optimal_trajectory
     wind_only = false
     

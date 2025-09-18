@@ -52,8 +52,9 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.9997f0
+y = 0.99f0
 p = 0.0f0
+gamma = y
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
