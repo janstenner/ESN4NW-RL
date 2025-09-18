@@ -57,14 +57,49 @@ function collect_runs(n = 5)
                     global seed = i
                     include(script_path)
                     
+                    # Algorithm-specific default parameters
+                    default_params = Dict(
+                        "SAC" => Dict(
+                            "inner_loops" => 10,
+                            "outer_loops" => 100,
+                            "optimal_trainings" => 80,
+                            "num_steps" => 10_000
+                        ),
+                        "PPO" => Dict(
+                            "inner_loops" => 10,
+                            "outer_loops" => 100,
+                            "optimal_trainings" => 80,
+                            "num_steps" => 10_000
+                        ),
+                        "PPO2" => Dict(
+                            "inner_loops" => 10,
+                            "outer_loops" => 100,
+                            "optimal_trainings" => 80,
+                            "num_steps" => 10_000
+                        ),
+                        "DDPG" => Dict(
+                            "inner_loops" => 10,
+                            "outer_loops" => 100,
+                            "optimal_trainings" => 80,
+                            "num_steps" => 10_000
+                        )
+                    )
+
                     # Set appropriate training parameters
-                    train_params = Dict()
+                    train_params = Dict{Symbol,Any}(
+                        :inner_loops => default_params[alg_name]["inner_loops"],
+                        :outer_loops => default_params[alg_name]["outer_loops"],
+                        :num_steps => default_params[alg_name]["num_steps"],
+                        :plot_runs => false,
+                        :reward_shaping => (rs_type == "with_RS")
+                    )
+
                     if il_type == "IL"
-                        train_params[:optimal_trainings] = 80
+                        train_params[:optimal_trainings] = default_params[alg_name]["optimal_trainings"]
                         global optimal_trajectory = trajectories[(alg_name == "SAC" || alg_name == "DDPG") ? "SAC_DDPG" : alg_name][rs_type]
+                    else
+                        train_params[:optimal_trainings] = 0
                     end
-                    train_params[:reward_shaping] = (rs_type == "with_RS")
-                    train_params[:plot_runs] = false
                     
                     # Run training with parameters
                     train(;train_params...)
