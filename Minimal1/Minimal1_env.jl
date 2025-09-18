@@ -365,7 +365,7 @@ function generate_random_init()
 end
 
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 5, only_wind_steps = 0, json = false, reward_shaping = true)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 5, only_wind_steps = 0, json = false, reward_shaping = true, plot_runs = true)
     global wind_only, optimal_trajectory
     wind_only = false
     
@@ -390,7 +390,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
 
     if optimal_trainings > 0
-        fill_optimal_trajectory(; reward_shaping = reward_shaping)
+        @assert isdefined(@__MODULE__, :optimal_trajectory) && !isnothing(optimal_trajectory) "optimal_trajectory ist nicht initialisiert"
     end
     
     global logs = []
@@ -542,10 +542,12 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             
         end
 
-        p1 = render_run(; exploration = true, plot_values = true)
-        #p2 = plot_critic(; return_plot = true)
-        #display([p1 p2])
-        #display(p1)
+        if plot_runs
+            p1 = render_run(; exploration = true)#, plot_values = true)
+            #p2 = plot_critic(; return_plot = true)
+            #display([p1 p2])
+            #display(p1)
+        end
 
     end
 

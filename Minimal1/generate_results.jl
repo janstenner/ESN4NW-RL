@@ -38,6 +38,9 @@ function ensure_nested_dict!(results, alg_name, il_type, reward_shaping)
     end
 end
 
+trajectories_file = "optimal_trajectories.jld2"
+trajectories = FileIO.load(trajectories_file, "trajectories")
+
 function collect_runs(n = 5)
     # Run training for each algorithm
     for (alg_name, script_path) in algorithms
@@ -58,8 +61,10 @@ function collect_runs(n = 5)
                     train_params = Dict()
                     if il_type == "IL"
                         train_params[:optimal_trainings] = 80
+                        global optimal_trajectory = trajectories[(alg_name == "SAC" || alg_name == "DDPG") ? "SAC_DDPG" : alg_name][rs_type]
                     end
                     train_params[:reward_shaping] = (rs_type == "with_RS")
+                    train_params[:plot_runs] = false
                     
                     # Run training with parameters
                     train(;train_params...)
