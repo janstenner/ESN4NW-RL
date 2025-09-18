@@ -19,10 +19,10 @@ end
 
 # List of algorithms to test
 algorithms = [
-    ("SAC", "SAC/Minimal1_SAC.jl"),
-    ("PPO", "PPO/Minimal1_PPO.jl"),
-    ("PPO2", "PPO2/Minimal1_PPO2.jl"),
-    ("DDPG", "DDPG/Minimal1_DDPG.jl")
+    ("SAC", "Minimal1/SAC/Minimal1_SAC.jl"),
+    ("PPO", "Minimal1/PPO/Minimal1_PPO.jl"),
+    ("PPO2", "Minimal1/PPO2/Minimal1_PPO2.jl"),
+    ("DDPG", "Minimal1/DDPG/Minimal1_DDPG.jl")
 ]
 
 # Function to ensure nested dictionary structure exists
