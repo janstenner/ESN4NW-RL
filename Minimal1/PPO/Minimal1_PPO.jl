@@ -41,8 +41,8 @@ gpu_env = false
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 1.6
-nna_scale_critic = 0.8
+nna_scale = 6.4
+nna_scale_critic = 3.2
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -69,9 +69,9 @@ logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1agen
 clip_grad = 0.5
-target_kl = Inf#10.0
+target_kl = 0.1
 clip1 = false
-start_logσ = -0.9
+start_logσ = -0.6
 tanh_end = false
 clip_range = 0.2f0
 

@@ -66,15 +66,15 @@ function collect_runs(n = 5)
                             "num_steps" => 10_000
                         ),
                         "PPO" => Dict(
-                            "inner_loops" => 10,
-                            "outer_loops" => 100,
-                            "optimal_trainings" => 80,
+                            "inner_loops" => 6,
+                            "outer_loops" => 300,
+                            "optimal_trainings" => 1,
                             "num_steps" => 10_000
                         ),
                         "PPO2" => Dict(
-                            "inner_loops" => 10,
-                            "outer_loops" => 100,
-                            "optimal_trainings" => 80,
+                            "inner_loops" => 6,
+                            "outer_loops" => 300,
+                            "optimal_trainings" => 1,
                             "num_steps" => 10_000
                         ),
                         "DDPG" => Dict(

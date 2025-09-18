@@ -53,34 +53,34 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.0f0
+p = 0.95f0
 gamma = y
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 10_000
+update_freq = 60_000
 
 
-learning_rate = 5e-5
-n_epochs = 4
-n_microbatches = 30
+learning_rate = 1e-3
+n_epochs = 5
+n_microbatches = 100
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0.001
 clip_grad = 0.5
-target_kl = Inf #0.001
+target_kl = 0.1 #0.001
 clip1 = false
-start_logσ = -1.4
-tanh_end = true
+start_logσ = -0.6
+tanh_end = false
 clip_range = 0.1f0
 
-betas = (0.8, 0.98)
+betas = (0.9, 0.99)
 noise = nothing #"perlin"
 noise_scale = 20
 normalize_advantage = true
-fear_scale = 0.001
-new_loss = false
+fear_scale = 0.3
+new_loss = true
 adaptive_weights = true
 
 

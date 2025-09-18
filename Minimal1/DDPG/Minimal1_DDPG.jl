@@ -62,11 +62,11 @@ update_after = 200_000
 update_freq = 10
 update_loops = 3
 reset_stage = POST_EPISODE_STAGE
-learning_rate = 3e-4
-learning_rate_critic = 3e-4
+learning_rate = 5e-5
+learning_rate_critic = 1e-4
 clip_grad = 0.5
 act_limit = 1.0
-act_noise = 0.1
+act_noise = 0.05
 trajectory_length = 1_000_000
 
 
