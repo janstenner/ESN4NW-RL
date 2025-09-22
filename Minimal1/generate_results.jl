@@ -104,11 +104,16 @@ function collect_runs(n = 5)
                     # Run training with parameters
                     train(;train_params...)
                     
+                    # Store only the policies from the agents
+                    agent_policy = agent.policy
+                    agent_save_policy = isnothing(agent_save) ? nothing : agent_save.policy
+                    
                     # Store results
                     results[alg_name][il_type][rs_type][seed] = Dict(
-                        "agent_save" => agent_save,
-                        "agent" => agent,
-                        "rewards" => hook.rewards
+                        "agent_save_policy" => agent_save_policy,
+                        "agent_policy" => agent_policy,
+                        "rewards" => hook.rewards,
+                        "validation_scores" => validation_scores
                     )
                     
                     FileIO.save(results_file, "results", results)
@@ -133,20 +138,110 @@ end
 
 
 
+function clear_all_trajectories!()
+    # Ensure results dictionary is loaded
+    if !@isdefined(results)
+        if isfile(results_file)
+            global results = FileIO.load(results_file, "results")
+            println("Loaded existing results file")
+        else
+            println("No results file found")
+            return
+        end
+    end
+
+    # Track number of trajectories cleared
+    cleared_count = 0
+
+    # Go through all results
+    for alg_name in keys(results)
+        # Skip Optimal as it doesn't contain agents
+        alg_name == "Optimal" && continue
+
+        for il_type in keys(results[alg_name])
+            for rs_type in keys(results[alg_name][il_type])
+                for seed in keys(results[alg_name][il_type][rs_type])
+                    # Convert stored agent to just its policy
+                    if haskey(results[alg_name][il_type][rs_type][seed], "agent")
+                        agent = results[alg_name][il_type][rs_type][seed]["agent"]
+                        if !isnothing(agent)
+                            results[alg_name][il_type][rs_type][seed]["agent_policy"] = agent.policy
+                            delete!(results[alg_name][il_type][rs_type][seed], "agent")
+                            cleared_count += 1
+                        end
+                    end
+
+                    # Convert stored agent_save to just its policy
+                    if haskey(results[alg_name][il_type][rs_type][seed], "agent_save")
+                        agent_save = results[alg_name][il_type][rs_type][seed]["agent_save"]
+                        if !isnothing(agent_save)
+                            results[alg_name][il_type][rs_type][seed]["agent_save_policy"] = agent_save.policy
+                            delete!(results[alg_name][il_type][rs_type][seed], "agent_save")
+                            cleared_count += 1
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    # Save updated results
+    FileIO.save(results_file, "results", results; compress=Lz4Filter())
+    println("Cleared $cleared_count trajectories and saved results to file")
+end
+
+
 function plot_validation_comparison()
     # Include validation script
-    include("Validation_Minimal1.jl")
+    include("Minimal1/Validation_Minimal1.jl")
     
-    # Get optimal baseline scores
-    println("Computing optimal baseline scores...")
-    optimal_scores = validate_agent(optimizer = true)
+    # Ensure results dictionary is loaded
+    if !@isdefined(results)
+        if isfile(results_file)
+            global results = FileIO.load(results_file, "results")
+            println("Loaded existing results file")
+        else
+            global results = Dict{String, Dict{String, Dict{String, Dict{Int, Dict{String, Any}}}}}()
+            println("Created new results dictionary")
+        end
+    end
+    
+    # Check for cached optimal baseline scores or compute them
+    optimal_scores = if haskey(results, "Optimal") && 
+                       haskey(results["Optimal"], "baseline") && 
+                       haskey(results["Optimal"]["baseline"], "scores") &&
+                       haskey(results["Optimal"]["baseline"]["scores"], 1)
+        println("Using cached optimal baseline scores...")
+        results["Optimal"]["baseline"]["scores"][1]["data"]
+    else
+        println("Computing optimal baseline scores...")
+        global optimal_scores = validate_agent(optimizer = true)
+        # Cache the optimal scores with proper nested structure
+        if !haskey(results, "Optimal")
+            results["Optimal"] = Dict{String, Dict{String, Dict{Int, Dict{String, Any}}}}()
+        end
+        if !haskey(results["Optimal"], "baseline")
+            results["Optimal"]["baseline"] = Dict{String, Dict{Int, Dict{String, Any}}}()
+        end
+        if !haskey(results["Optimal"]["baseline"], "scores")
+            results["Optimal"]["baseline"]["scores"] = Dict{Int, Dict{String, Any}}()
+        end
+        results["Optimal"]["baseline"]["scores"][1] = Dict{String, Any}("data" => optimal_scores)
+        # Save updated results to file
+        FileIO.save(results_file, "results", results)
+        println("Saved optimal baseline scores to results file")
+        optimal_scores
+    end
     
     # Initialize dictionary to store all validation results
-    best_validation_results = Dict{String, Vector{Float32}}()
+    global best_validation_results = Dict{String, Vector{Float32}}()
     best_validation_results["Optimal"] = optimal_scores
     
     # Go through all results and validate each agent
     for alg_name in keys(results)
+        # Skip the Optimal results as they're handled separately
+        alg_name == "Optimal" && continue
+        
         for il_type in keys(results[alg_name])
             for rs_type in keys(results[alg_name][il_type])
                 # Collect scores for all seeds of this configuration
@@ -154,14 +249,17 @@ function plot_validation_comparison()
                 config_means = Dict{Int, Float64}()
                 
                 for seed in keys(results[alg_name][il_type][rs_type])
-                    # Set the global agent to the saved agent
-                    global agent = results[alg_name][il_type][rs_type][seed]["agent_save"]
+                    # Get the saved policy
+                    saved_policy = results[alg_name][il_type][rs_type][seed]["agent_save_policy"]
                     
-                    # Skip if agent is nothing
-                    if isnothing(agent)
-                        println("Skipping $(alg_name)-$(il_type)-$(rs_type)-seed$(seed) (no agent saved)")
+                    # Skip if policy is nothing
+                    if isnothing(saved_policy)
+                        println("Skipping $(alg_name)-$(il_type)-$(rs_type)-seed$(seed) (no policy saved)")
                         continue
                     end
+                    
+                    # Construct new agent with saved policy
+                    global agent = Agent(saved_policy, Trajectory())
                     
                     # Run validation
                     println("Validating $(alg_name)-$(il_type)-$(rs_type)-seed$(seed)...")
@@ -187,11 +285,11 @@ function plot_validation_comparison()
     
     # Add optimal baseline first
     push!(traces, box(
-        y=validation_results["Optimal"],
+        y=best_validation_results["Optimal"],
         name="Optimal",
         boxpoints="all",
         quartilemethod="linear",
-        marker_color="rgb(0, 255, 0)"  # Green for optimal
+        marker_color="rgb(76, 175, 80)"  # Muted forest green
     ))
     
     # Add all other results
@@ -203,27 +301,30 @@ function plot_validation_comparison()
             il_type = parts[2]
             rs_type = parts[3]
             
-            # Choose color based on algorithm, IL type, and RS type
+            # Define semi-muted, aesthetic base colors for algorithms
             base_color = if alg == "SAC"
-                [255, 0, 0]  # Red base
+                [184, 71, 82]    # Richer burgundy
             elseif alg == "PPO"
-                [0, 0, 255]  # Blue base
+                [98, 150, 209]   # Brighter steel blue
             elseif alg == "PPO2"
-                [0, 255, 0]  # Green base
+                [139, 173, 115]  # Livelier sage green
             else  # DDPG
-                [255, 0, 255]  # Purple base
+                [168, 119, 175]  # Brighter purple
             end
             
-            # Modify color based on IL and RS
+            # IL affects hue (shifts color)
             if il_type == "IL"
-                base_color = base_color .* 0.8 .+ (255 * 0.2)  # Lighter
+                base_color = base_color .* 1.3 # Slightly lighter
             end
             
+            # RS affects saturation
             if rs_type == "with_RS"
-                base_color = base_color .* 0.9  # Slightly darker
+                # Decrease saturation by moving towards gray while keeping luminance
+                luminance = sum(base_color) / 3
+                base_color = round.(Int, base_color .* 0.5 .+ luminance * 0.5)
             end
             
-            color = "rgb($(round(Int, base_color[1])), $(round(Int, base_color[2])), $(round(Int, base_color[3])))"
+            color = "rgb($(base_color[1]), $(base_color[2]), $(base_color[3]))"
             
             push!(traces, box(
                 y=value,
@@ -239,7 +340,7 @@ function plot_validation_comparison()
     layout = Layout(
         title="Algorithm Performance Comparison",
         yaxis_title="Validation Score",
-        boxmode="group",
+        #boxmode="group",
         showlegend=true,
         legend=attr(
             orientation="h",

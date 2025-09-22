@@ -53,21 +53,21 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.95f0
+p = 0.0f0 #99f0
 gamma = y
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 60_000
+update_freq = 3000
 
 
-learning_rate = 1e-3
-n_epochs = 5
-n_microbatches = 100
+learning_rate = 3e-4
+n_epochs = 10
+n_microbatches = 5
 logσ_is_network = false
 max_σ = 1.0f0
-entropy_loss_weight = 0.001
+entropy_loss_weight = 0.1
 clip_grad = 0.5
 target_kl = 0.1 #0.001
 clip1 = false
@@ -79,7 +79,7 @@ betas = (0.9, 0.99)
 noise = nothing #"perlin"
 noise_scale = 20
 normalize_advantage = true
-fear_scale = 0.3
+fear_scale = 0.04
 new_loss = true
 adaptive_weights = true
 
@@ -161,7 +161,7 @@ optimal_trajectory = trajectories["PPO2"]["with_RS"]
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false, plot_values = false, plot_critic2 = false, critic2_diagnostics = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = true, plot_values = true, plot_critic2 = false, critic2_diagnostics = false)
     global history_steps
 
     if show_training_episode
@@ -602,3 +602,4 @@ function plot_trajectory()
 
     display(plott)
 end
+
