@@ -7,3 +7,5 @@ video_output/*
 
 training_results.jld2
 optimal_trajectories.jld2
+
+old_results/*
