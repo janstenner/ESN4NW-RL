@@ -206,19 +206,22 @@ function plot_validation_comparison()
         end
     end
     
-    # Check for cached optimal baseline scores or compute them
+    # Check for cached optimal baseline scores from various sources
     optimal_scores = if haskey(results, "Optimal") && 
                        haskey(results["Optimal"], "baseline") && 
                        haskey(results["Optimal"]["baseline"], "scores") &&
                        haskey(results["Optimal"]["baseline"]["scores"], 1)
-        println("Using cached optimal baseline scores...")
+        println("Using cached optimal baseline scores from results...")
         results["Optimal"]["baseline"]["scores"][1]["data"]
+    elseif @isdefined(validation_results) && haskey(validation_results, "optimizer")
+        println("Using optimal baseline scores from validation_results...")
+        validation_results["optimizer"]
     else
         println("Computing optimal baseline scores...")
         global optimal_scores = validate_agent(optimizer = true)
         # Cache the optimal scores with proper nested structure
         if !haskey(results, "Optimal")
-            results["Optimal"] = Dict{String, Dict{String, Dict{Int, Dict{String, Any}}}}()
+            results["Optimal"] = Dict{String, Dict{String, Dict{String, Dict{Int, Dict{String, Any}}}}}()
         end
         if !haskey(results["Optimal"], "baseline")
             results["Optimal"]["baseline"] = Dict{String, Dict{Int, Dict{String, Any}}}()
@@ -236,6 +239,12 @@ function plot_validation_comparison()
     # Initialize dictionary to store all validation results
     global best_validation_results = Dict{String, Vector{Float32}}()
     best_validation_results["Optimal"] = optimal_scores
+    
+    # Add untrained baseline if available
+    if @isdefined(validation_results) && haskey(validation_results, "untrained")
+        println("Adding untrained baseline scores...")
+        best_validation_results["Untrained"] = validation_results["untrained"]
+    end
     
     # Go through all results and validate each agent
     for alg_name in keys(results)
@@ -292,9 +301,20 @@ function plot_validation_comparison()
         marker_color="rgb(76, 175, 80)"  # Muted forest green
     ))
     
+    # Add untrained baseline next if available
+    if haskey(best_validation_results, "Untrained")
+        push!(traces, box(
+            y=best_validation_results["Untrained"],
+            name="Untrained",
+            boxpoints="all",
+            quartilemethod="linear",
+            marker_color="rgb(239, 83, 80)"  # Reddish color
+        ))
+    end
+    
     # Add all other results
     for (key, value) in sort(collect(best_validation_results))
-        if key != "Optimal"
+        if key != "Optimal" && key != "Untrained"
             # Extract algorithm, IL type and RS type for coloring
             parts = split(key, "-")
             alg = parts[1]
