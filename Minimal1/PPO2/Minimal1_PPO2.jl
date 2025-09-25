@@ -41,8 +41,8 @@ gpu_env = false
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 1.4
-nna_scale_critic = 1.4
+nna_scale = 6.4
+nna_scale_critic = 3.2
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -59,27 +59,29 @@ gamma = y
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 3000
+update_freq = 1000
 
 
-learning_rate = 3e-4
-n_epochs = 10
-n_microbatches = 5
+learning_rate = 6e-4
+learning_rate_critic = 6e-4
+n_epochs = 1
+n_microbatches = 1
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0.1
 clip_grad = 0.5
-target_kl = 0.1 #0.001
+target_kl = 0.01 #0.001
 clip1 = false
 start_logσ = -0.6
-tanh_end = false
+tanh_end = true
 clip_range = 0.1f0
+clip_range_vf = nothing#0.4f0
 
 betas = (0.9, 0.99)
 noise = nothing #"perlin"
 noise_scale = 20
 normalize_advantage = true
-fear_scale = 0.04
+fear_scale = 400.4
 new_loss = true
 adaptive_weights = true
 
@@ -116,6 +118,7 @@ function initialize_setup(;use_random_init = false)
                 y = y, p = p,
                 update_freq = update_freq,
                 learning_rate = learning_rate,
+                learning_rate_critic = learning_rate_critic,
                 nna_scale = nna_scale,
                 nna_scale_critic = nna_scale_critic,
                 drop_middle_layer = drop_middle_layer,
@@ -132,6 +135,7 @@ function initialize_setup(;use_random_init = false)
                 start_logσ = start_logσ,
                 tanh_end = tanh_end,
                 clip_range = clip_range,
+                clip_range_vf = clip_range_vf,
                 betas = betas,
                 noise = noise,
                 noise_scale = noise_scale,
@@ -198,8 +202,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         results_run["σ$k"] = []
     end
 
-    values = []
-    next_values = []
+    offset_values = []
+    q_values = []
     states = []
     mus = []
     terminals = []
@@ -224,14 +228,14 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         #action = agent(env)
 
         value = agent.policy.approximator.critic(env.state)[1]
-        value = agent.policy.approximator.critic2(vcat(env.state, μ))[1]
-        push!(values, value)
+        offset_value = agent.policy.approximator.critic2(vcat(env.state, μ))[1]
+        push!(offset_values, offset_value)
 
-        next_value = agent.policy.approximator.critic2(vcat(env.state, action))[1]
-        push!(next_values, next_value)
+        q_value = agent.policy.approximator.critic2(vcat(env.state, action))[1]
+        push!(q_values, q_value)
 
         offset = agent.policy.approximator.critic2(vcat(env.state, μ))[1]
-        #push!(next_values, agent.policy.approximator.critic2(vcat(env.state, action))[1] - offset)
+        #push!(q_values, agent.policy.approximator.critic2(vcat(env.state, action))[1] - offset)
         push!(states, env.state)
         push!(mus, μ)
 
@@ -305,7 +309,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         end
     elseif gae
 
-        deltas = next_values - values
+        deltas = q_values - offset_values
 
         global y, p
         advantages, returns = generalized_advantage_estimation(
@@ -319,15 +323,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
         #advantages = next_values #- values
 
-        advantages = (advantages .- mean(advantages)) ./ clamp(std(advantages), 1e-8, 1000.0)
+        if normalize_advantage
+            advantages = (advantages .- mean(advantages)) ./ clamp(std(advantages), 1e-8, 1000.0)
+        end
 
 
-        println("Last Reward: $(results_run["rewards"][end])")
-        println("Last Value: $(values[end])")
-        println("Last Next Value: $(next_values[end])")
-        println("Right Last Advantage Value: $(results_run["rewards"][end] - values[end])")
-        println("Wrong Last Advantage Value: $(results_run["rewards"][end] + y * next_values[end]- values[end])")
-        println("Actual Last Advantage Value: $(advantages[end])")
+        
 
         push!(to_plot, scatter(x=xx, y=results_run["hpc1"], name="Advantage",
             mode="markers",
@@ -341,15 +342,15 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             ),
             line=attr(color = "rgba(200, 200, 200, 0.3)")))
         
-        push!(to_plot, scatter(x=xx, y=values, name="Values", yaxis = "y2"))
-        push!(to_plot, scatter(x=xx, y=next_values, name="Next Values", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=offset_values, name="Values", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=q_values, name="Next Values", yaxis = "y2"))
     else
         push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
     end
 
     if plot_values
-        push!(to_plot, scatter(x=xx, y=values, name="Critic Value", yaxis = "y2"))
-        push!(to_plot, scatter(x=xx, y=returns, name="Return", yaxis = "y2"))
+        #push!(to_plot, scatter(x=xx, y=offset_values, name="Critic Value", yaxis = "y2"))
+        #push!(to_plot, scatter(x=xx, y=returns, name="Return", yaxis = "y2"))
     end
 
     push!(to_plot, scatter(x=xx, y=results_run["loadleft"], name="Load Left"))

@@ -59,21 +59,23 @@ gamma = y
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 60_000
+update_freq = 20480
 
 
-learning_rate = 3e-4
+learning_rate = 1e-4
+learning_rate_critic = 3e-4
 n_epochs = 5
-n_microbatches = 100
+n_microbatches = 32
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1agen
-clip_grad = 0.5
-target_kl = 0.1
+clip_grad = 0.02
+target_kl = 0.01
 clip1 = false
 start_logσ = -0.6
 tanh_end = false
-clip_range = 0.2f0
+clip_range = 0.05f0
+clip_range_vf = 0.08
 
 betas = (0.9, 0.99)
 noise = nothing#"perlin"
@@ -144,6 +146,7 @@ function initialize_setup(;use_random_init = false)
                 y = y, p = p,
                 update_freq = update_freq,
                 learning_rate = learning_rate,
+                learning_rate_critic = learning_rate_critic,
                 nna_scale = nna_scale,
                 nna_scale_critic = nna_scale_critic,
                 drop_middle_layer = drop_middle_layer,
@@ -160,6 +163,7 @@ function initialize_setup(;use_random_init = false)
                 start_logσ = start_logσ,
                 tanh_end = tanh_end,
                 clip_range = clip_range,
+                clip_range_vf = clip_range_vf,
                 betas = betas,
                 noise = noise,
                 normalize_advantage = normalize_advantage,)

@@ -299,7 +299,7 @@ function calculate_day(action, env, step = nothing; reward_shaping = true)
 
     if reward_shaping
         # potential based reward shaping
-        beta = 1.0
+        beta = 0.5
         reward += beta * (compute_left_before - compute_left_after - (gamma-1) * compute_left_after)
 
         reward *= reward_scale_factor

@@ -67,13 +67,13 @@ function collect_runs(n = 5)
                         ),
                         "PPO" => Dict(
                             "inner_loops" => 6,
-                            "outer_loops" => 300,
+                            "outer_loops" => 800,
                             "optimal_trainings" => 1,
                             "num_steps" => 10_000
                         ),
                         "PPO2" => Dict(
                             "inner_loops" => 6,
-                            "outer_loops" => 300,
+                            "outer_loops" => 800,
                             "optimal_trainings" => 1,
                             "num_steps" => 10_000
                         ),
@@ -237,13 +237,13 @@ function plot_validation_comparison()
     end
     
     # Initialize dictionary to store all validation results
-    global best_validation_results = Dict{String, Vector{Float32}}()
-    best_validation_results["Optimal"] = optimal_scores
+    global best_validation_results = Dict{String, Any}()
+    best_validation_results["Optimal"] = (optimal_scores, nothing)
     
     # Add untrained baseline if available
     if @isdefined(validation_results) && haskey(validation_results, "untrained")
         println("Adding untrained baseline scores...")
-        best_validation_results["Untrained"] = validation_results["untrained"]
+        best_validation_results["Untrained"] = (validation_results["untrained"], nothing)
     end
     
     # Go through all results and validate each agent
@@ -256,6 +256,7 @@ function plot_validation_comparison()
                 # Collect scores for all seeds of this configuration
                 config_scores = Dict{Int, Vector{Float32}}()
                 config_means = Dict{Int, Float64}()
+                config_timelines = Dict{Int, Vector{Float32}}()
                 
                 for seed in keys(results[alg_name][il_type][rs_type])
                     # Get the saved policy
@@ -274,48 +275,40 @@ function plot_validation_comparison()
                     println("Validating $(alg_name)-$(il_type)-$(rs_type)-seed$(seed)...")
                     scores = validate_agent()
                     
-                    # Store scores and mean
+                    # Store scores, mean and timeline
                     config_scores[seed] = scores
                     config_means[seed] = mean(scores)
+                    config_timelines[seed] = results[alg_name][il_type][rs_type][seed]["validation_scores"]
                 end
                 
                 # Find the best seed based on mean score
                 if !isempty(config_means)
                     best_seed = argmax(config_means)
                     key = "$(alg_name)-$(il_type)-$(rs_type)"
-                    best_validation_results[key] = config_scores[best_seed]
+                    best_validation_results[key] = (
+                        config_scores[best_seed],
+                        config_timelines[best_seed]
+                    )
                 end
             end
         end
     end
     
-    # Create box plots
-    traces = AbstractTrace[]
+    # First, calculate the order based on mean scores
+    order = sort(collect(keys(best_validation_results)), 
+                by=key->mean(best_validation_results[key][1]), 
+                rev=true)  # descending order
+
+    # Create color mapping for consistent colors across plots
+    color_map = Dict{String, Vector{Int}}()
     
-    # Add optimal baseline first
-    push!(traces, box(
-        y=best_validation_results["Optimal"],
-        name="Optimal",
-        boxpoints="all",
-        quartilemethod="linear",
-        marker_color="rgb(76, 175, 80)"  # Muted forest green
-    ))
+    # Define colors for special cases
+    color_map["Optimal"] = [76, 175, 80]  # Muted forest green
+    color_map["Untrained"] = [239, 83, 80]  # Reddish color
     
-    # Add untrained baseline next if available
-    if haskey(best_validation_results, "Untrained")
-        push!(traces, box(
-            y=best_validation_results["Untrained"],
-            name="Untrained",
-            boxpoints="all",
-            quartilemethod="linear",
-            marker_color="rgb(239, 83, 80)"  # Reddish color
-        ))
-    end
-    
-    # Add all other results
-    for (key, value) in sort(collect(best_validation_results))
+    # Define algorithm colors
+    for key in order
         if key != "Optimal" && key != "Untrained"
-            # Extract algorithm, IL type and RS type for coloring
             parts = split(key, "-")
             alg = parts[1]
             il_type = parts[2]
@@ -332,35 +325,42 @@ function plot_validation_comparison()
                 [168, 119, 175]  # Brighter purple
             end
             
-            # IL affects hue (shifts color)
+            # IL affects hue
             if il_type == "IL"
-                base_color = base_color .* 1.3 # Slightly lighter
+                base_color = round.(Int, base_color .* 1.3)
             end
             
             # RS affects saturation
             if rs_type == "with_RS"
-                # Decrease saturation by moving towards gray while keeping luminance
                 luminance = sum(base_color) / 3
                 base_color = round.(Int, base_color .* 0.5 .+ luminance * 0.5)
             end
             
-            color = "rgb($(base_color[1]), $(base_color[2]), $(base_color[3]))"
-            
-            push!(traces, box(
-                y=value,
-                name=key,
-                boxpoints="all",
-                quartilemethod="linear",
-                marker_color=color
-            ))
+            color_map[key] = base_color
         end
     end
+
+    # Create first plot (validation scores)
+    traces1 = AbstractTrace[]
     
-    # Create and display the plot with a more readable layout
-    layout = Layout(
+    # Add traces in order
+    for key in order
+        scores, _ = best_validation_results[key]
+        color = color_map[key]
+        
+        push!(traces1, box(
+            y=scores,
+            name=key,
+            boxpoints="all",
+            quartilemethod="linear",
+            marker_color="rgb($(color[1]), $(color[2]), $(color[3]))"
+        ))
+    end
+    
+    # Create and display the validation scores plot
+    layout1 = Layout(
         title="Algorithm Performance Comparison",
         yaxis_title="Validation Score",
-        #boxmode="group",
         showlegend=true,
         legend=attr(
             orientation="h",
@@ -369,11 +369,50 @@ function plot_validation_comparison()
             xanchor="center",
             x=0.5
         ),
-        margin=attr(b=100)  # Add bottom margin for legend
+        margin=attr(b=100)
     )
     
-    p = plot(traces, layout)
-    display(p)
+    p1 = plot(traces1, layout1)
+    display(p1)
+
+    # Create second plot (validation timelines)
+    traces2 = AbstractTrace[]
     
-    return p  # Return the plot object in case it's needed
+    # Add traces in the same order
+    for key in order
+        _, timeline = best_validation_results[key]
+        
+        # Skip if timeline is nothing
+        if !isnothing(timeline)
+            color = color_map[key]
+            
+            push!(traces2, scatter(
+                y=timeline,
+                name=key,
+                mode="lines",
+                line_color="rgb($(color[1]), $(color[2]), $(color[3]))"
+            ))
+        end
+    end
+    
+    # Create and display the timeline plot
+    layout2 = Layout(
+        title="Validation Score Timeline During Training",
+        yaxis_title="Validation Score",
+        xaxis_title="Training Steps",
+        showlegend=true,
+        legend=attr(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.3,
+            xanchor="center",
+            x=0.5
+        ),
+        margin=attr(b=100)
+    )
+    
+    p2 = plot(traces2, layout2)
+    display(p2)
+    
+    return p1, p2  # Return both plot objects
 end
