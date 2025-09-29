@@ -41,9 +41,16 @@ end
 trajectories_file = "optimal_trajectories.jld2"
 trajectories = FileIO.load(trajectories_file, "trajectories")
 
-function collect_runs(n = 5)
+function collect_runs(n = 5; selected_algorithms::Vector{String} = String[])
+    # Filter algorithms based on input or use all if none specified
+    algs_to_run = if isempty(selected_algorithms)
+        algorithms
+    else
+        filter(a -> a[1] in selected_algorithms, algorithms)
+    end
+    
     # Run training for each algorithm
-    for (alg_name, script_path) in algorithms
+    for (alg_name, script_path) in algs_to_run
         println("\n=== Testing $alg_name ===")
         
         # Run all combinations of IL and reward_shaping
