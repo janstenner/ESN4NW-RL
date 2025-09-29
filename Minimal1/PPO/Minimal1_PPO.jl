@@ -59,18 +59,18 @@ gamma = y
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 20480
+update_freq = 70_000
 
 
 learning_rate = 1e-4
 learning_rate_critic = 3e-4
 n_epochs = 5
-n_microbatches = 32
+n_microbatches = 100
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1agen
 clip_grad = 0.02
-target_kl = 0.01
+target_kl = 0.1
 clip1 = false
 start_logσ = -0.6
 tanh_end = false

@@ -59,18 +59,19 @@ gamma = y
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 1000
+update_freq = 7000
 
 
 learning_rate = 6e-4
 learning_rate_critic = 6e-4
-n_epochs = 1
+n_epochs = 10
 n_microbatches = 1
+actorbatch_size = update_freq
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0.1
 clip_grad = 0.5
-target_kl = 0.01 #0.001
+target_kl = 0.21 #0.001
 clip1 = false
 start_logσ = -0.6
 tanh_end = true
@@ -81,7 +82,7 @@ betas = (0.9, 0.99)
 noise = nothing #"perlin"
 noise_scale = 20
 normalize_advantage = true
-fear_scale = 400.4
+fear_scale = 0.4
 new_loss = true
 adaptive_weights = true
 
@@ -127,6 +128,7 @@ function initialize_setup(;use_random_init = false)
                 clip1 = clip1,
                 n_epochs = n_epochs,
                 n_microbatches = n_microbatches,
+                actorbatch_size = actorbatch_size,
                 logσ_is_network = logσ_is_network,
                 max_σ = max_σ,
                 entropy_loss_weight = entropy_loss_weight,
