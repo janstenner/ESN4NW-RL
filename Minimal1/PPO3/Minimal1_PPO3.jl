@@ -110,7 +110,7 @@ function initialize_setup(;use_random_init = false)
         
         
 
-        global agent = create_agent_ppo2(
+        global agent = create_agent_ppo3(
                 # approximator = approximator,
                 action_space = actionspace,
                 state_space = env.state_space,
