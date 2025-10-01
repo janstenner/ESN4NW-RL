@@ -204,8 +204,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         results_run["σ$k"] = []
     end
 
-    offset_values = []
-    q_values = []
+    values = []
+    values2 = []
     states = []
     mus = []
     terminals = []
@@ -230,14 +230,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         #action = agent(env)
 
         value = agent.policy.approximator.critic(env.state)[1]
-        offset_value = agent.policy.approximator.critic2(vcat(env.state, μ))[1]
-        push!(offset_values, offset_value)
+        push!(values, value)
 
-        q_value = agent.policy.approximator.critic2(vcat(env.state, action))[1]
-        push!(q_values, q_value)
+        value2 = agent.policy.approximator.critic2(env.state)[1]
+        push!(values2, value2)
 
-        offset = agent.policy.approximator.critic2(vcat(env.state, μ))[1]
-        #push!(q_values, agent.policy.approximator.critic2(vcat(env.state, action))[1] - offset)
+        
         push!(states, env.state)
         push!(mus, μ)
 
@@ -311,7 +309,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         end
     elseif gae
 
-        deltas = q_values - offset_values
+        deltas = results_run["rewards"] .+ values2 .* (1 .- terminals) .- values
 
         global y, p
         advantages, returns = generalized_advantage_estimation(
@@ -344,8 +342,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             ),
             line=attr(color = "rgba(200, 200, 200, 0.3)")))
         
-        push!(to_plot, scatter(x=xx, y=offset_values, name="Values", yaxis = "y2"))
-        push!(to_plot, scatter(x=xx, y=q_values, name="Next Values", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=values, name="Values", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=values2, name="Next Values", yaxis = "y2"))
     else
         push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
     end
