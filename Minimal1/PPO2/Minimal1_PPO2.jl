@@ -62,16 +62,16 @@ start_policy = ZeroPolicy(actionspace)
 update_freq = 7000
 
 
-learning_rate = 6e-4
-learning_rate_critic = 6e-4
+learning_rate = 1e-4
+learning_rate_critic = 2e-4
 n_epochs = 10
 n_microbatches = 1
-actorbatch_size = update_freq
-logσ_is_network = false
+actorbatch_size = 2000
+logσ_is_network = true
 max_σ = 1.0f0
 entropy_loss_weight = 0.1
-clip_grad = 0.5
-target_kl = 0.21 #0.001
+clip_grad = 0.4
+target_kl = 0.01 #0.001
 clip1 = false
 start_logσ = -0.6
 tanh_end = true
