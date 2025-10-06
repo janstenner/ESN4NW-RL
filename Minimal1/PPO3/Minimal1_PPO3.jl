@@ -53,38 +53,42 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.0f0 #99f0
+p = 0.0f0 #0.99f0
 gamma = y
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 7000
+update_freq = 60000
+
+critic_frozen_update_freq = 4
+actor_update_freq = 1
 
 
-learning_rate = 1e-4
+learning_rate = 5e-5
 learning_rate_critic = 2e-4
-n_epochs = 10
-n_microbatches = 1
-actorbatch_size = 2000
-logσ_is_network = true
+n_epochs = 5
+n_microbatches = 300
+actorbatch_size = 40
+logσ_is_network = false
 max_σ = 1.0f0
-entropy_loss_weight = 0.1
-clip_grad = 0.4
+entropy_loss_weight = 0.01
+clip_grad = 0.5
 target_kl = 0.01 #0.001
 clip1 = false
 start_logσ = -0.6
 tanh_end = true
 clip_range = 0.1f0
-clip_range_vf = nothing#0.4f0
+clip_range_vf = 0.2f0
 
 betas = (0.9, 0.99)
 noise = nothing #"perlin"
 noise_scale = 20
 normalize_advantage = true
 fear_scale = 0.4
-new_loss = true
+new_loss = false#true
 adaptive_weights = true
+critic2_takes_action = true
 
 
 wind_only = false
@@ -118,6 +122,8 @@ function initialize_setup(;use_random_init = false)
                 rng = rng,
                 y = y, p = p,
                 update_freq = update_freq,
+                critic_frozen_update_freq = critic_frozen_update_freq,
+                actor_update_freq = actor_update_freq,
                 learning_rate = learning_rate,
                 learning_rate_critic = learning_rate_critic,
                 nna_scale = nna_scale,
@@ -144,7 +150,8 @@ function initialize_setup(;use_random_init = false)
                 normalize_advantage = normalize_advantage,
                 fear_scale = fear_scale,
                 new_loss = new_loss,
-                adaptive_weights = adaptive_weights)
+                adaptive_weights = adaptive_weights,
+                critic2_takes_action = critic2_takes_action,)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -232,7 +239,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         value = agent.policy.approximator.critic(env.state)[1]
         push!(values, value)
 
-        value2 = agent.policy.approximator.critic2(env.state)[1]
+        critic2_input = critic2_takes_action ? vcat(env.state, action) : env.state
+        value2 = agent.policy.approximator.critic2(critic2_input)[1]
         push!(values2, value2)
 
         

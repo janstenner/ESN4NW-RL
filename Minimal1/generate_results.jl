@@ -145,56 +145,60 @@ end
 
 
 
-function clear_all_trajectories!()
-    # Ensure results dictionary is loaded
-    if !@isdefined(results)
-        if isfile(results_file)
-            global results = FileIO.load(results_file, "results")
-            println("Loaded existing results file")
-        else
-            println("No results file found")
-            return
-        end
-    end
 
-    # Track number of trajectories cleared
-    cleared_count = 0
 
-    # Go through all results
+function clean_reconstructed_policies!()
+    println("Starting policy type check...")
+    deleted_count = 0
+    
+    # Go through all algorithms
     for alg_name in keys(results)
-        # Skip Optimal as it doesn't contain agents
+        # Skip the Optimal results as they don't have policies
         alg_name == "Optimal" && continue
-
+        
+        # Expected policy type for each algorithm
+        expected_type = if alg_name == "PPO"
+            PPOPolicy
+        elseif alg_name == "PPO2"
+            PPOPolicy2
+        elseif alg_name == "SAC"
+            SACPolicy
+        elseif alg_name == "DDPG"
+            CustomDDPGPolicy
+        else
+            continue  # Skip unknown algorithms
+        end
+        
+        # Go through all IL variants
         for il_type in keys(results[alg_name])
+            # Go through all reward shaping variants
             for rs_type in keys(results[alg_name][il_type])
+                seeds_to_delete = Int[]
+                
+                # Check each seed
                 for seed in keys(results[alg_name][il_type][rs_type])
-                    # Convert stored agent to just its policy
-                    if haskey(results[alg_name][il_type][rs_type][seed], "agent")
-                        agent = results[alg_name][il_type][rs_type][seed]["agent"]
-                        if !isnothing(agent)
-                            results[alg_name][il_type][rs_type][seed]["agent_policy"] = agent.policy
-                            delete!(results[alg_name][il_type][rs_type][seed], "agent")
-                            cleared_count += 1
-                        end
+                    policy = results[alg_name][il_type][rs_type][seed]["agent_policy"]
+                    
+                    # Check if policy is reconstructed
+                    if typeof(policy) != expected_type && contains(string(typeof(policy)), "ReconstructedMutable")
+                        push!(seeds_to_delete, seed)
+                        deleted_count += 1
+                        println("Found reconstructed policy in $alg_name ($il_type, $rs_type) seed $seed")
                     end
-
-                    # Convert stored agent_save to just its policy
-                    if haskey(results[alg_name][il_type][rs_type][seed], "agent_save")
-                        agent_save = results[alg_name][il_type][rs_type][seed]["agent_save"]
-                        if !isnothing(agent_save)
-                            results[alg_name][il_type][rs_type][seed]["agent_save_policy"] = agent_save.policy
-                            delete!(results[alg_name][il_type][rs_type][seed], "agent_save")
-                            cleared_count += 1
-                        end
-                    end
+                end
+                
+                # Delete identified seeds
+                for seed in seeds_to_delete
+                    delete!(results[alg_name][il_type][rs_type], seed)
                 end
             end
         end
     end
-
-    # Save updated results
-    FileIO.save(results_file, "results", results; compress=Lz4Filter())
-    println("Cleared $cleared_count trajectories and saved results to file")
+    
+    # Save the cleaned results
+    FileIO.save(results_file, "results", results)
+    println("\nCleaning complete: Removed $deleted_count reconstructed policies")
+    println("Updated results saved to $results_file")
 end
 
 
@@ -421,5 +425,5 @@ function plot_validation_comparison()
     p2 = plot(traces2, layout2)
     display(p2)
     
-    return p1, p2  # Return both plot objects
+    #return p1, p2  # Return both plot objects
 end
