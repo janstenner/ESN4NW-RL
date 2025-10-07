@@ -29,9 +29,10 @@ end
 
 
 
-function validate_agent(; optimizer = false)
+function validate_agent(; optimizer = false, render = false)
 
     global validation_rewards = Float32[]
+    xx = collect(dt/60:dt/60:te/60)
 
     for (w, gp) in set
 
@@ -45,6 +46,8 @@ function validate_agent(; optimizer = false)
         env.y0 = deepcopy(y0)
         env.y = deepcopy(y0)
         env.state = env.featurize(; env = env)
+
+        global results_run = Dict("rewards" => [], "loadleft" => [], "hpc" => [])
 
         if optimizer
             optimal_actions = optimize_day(5000)
@@ -65,8 +68,47 @@ function validate_agent(; optimizer = false)
                 env(action; reward_shaping = false)
 
                 reward_sum += mean(env.reward)
+
+                if render
+                    push!(results_run["hpc"], clamp((action[1]+1)*0.5, 0, 1)) #env.p[k])
+                    push!(results_run["rewards"], env.reward[1])
+                    push!(results_run["loadleft"], env.y[1])
+                end
                 
             end
+        end
+
+        if render
+            colorscale = [[0, "rgb(255, 0, 0)"], [0.5, "rgb(255, 255, 255)"], [1, "rgb(0, 255, 0)"], ]
+            layout = Layout(
+                            plot_bgcolor = "white",
+                            font=attr(
+                                family="Arial",
+                                size=16,
+                                color="black"
+                            ),
+                            showlegend = true,
+                            legend=attr(x=0.5, y=-0.1, orientation="h", xanchor="center"),
+                            xaxis = attr(gridcolor = "#E0E0E0FF",
+                                        linecolor = "#888888"),
+                            yaxis = attr(gridcolor = "#E0E0E0FF",
+                                        linecolor = "#888888",
+                            ),#range=[0,1]),
+                            yaxis2 = attr(
+                                overlaying="y",
+                                side="right",
+                                titlefont_color="orange",
+                                #range=[-1, 1]
+                            ),
+                        )
+            to_plot = AbstractTrace[]
+            push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
+            push!(to_plot, scatter(x=xx, y=results_run["loadleft"], name="Load Left"))
+            push!(to_plot, scatter(x=xx, y=grid_price[history_steps:end], name="Grid Price"))
+            push!(to_plot, scatter(x=xx, y=results_run["hpc"], name="WindCORE utilization"))
+            push!(to_plot, scatter(x=xx, y=wind[1][history_steps:end], name="Wind Power"))
+            plott = plot(Vector(to_plot), layout)
+            display(plott)
         end
 
         push!(validation_rewards, reward_sum)

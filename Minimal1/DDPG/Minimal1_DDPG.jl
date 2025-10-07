@@ -69,6 +69,7 @@ act_limit = 1.0
 act_noise = 0.05
 trajectory_length = 1_000_000
 
+reward_shaping = false
 
 
 
