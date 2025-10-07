@@ -86,10 +86,10 @@ function collect_runs(n = 5; selected_algorithms::Vector{String} = String[])
                             "num_steps" => 10_000
                         ),
                         "PPO3" => Dict(
-                            "inner_loops" => 6,
-                            "outer_loops" => 800,
+                            "inner_loops" => 1,
+                            "outer_loops" => 2500,
                             "optimal_trainings" => 1,
-                            "num_steps" => 10_000
+                            "num_steps" => 12_000
                         ),
                         "DDPG" => Dict(
                             "inner_loops" => 1,
