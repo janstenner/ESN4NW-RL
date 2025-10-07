@@ -53,33 +53,33 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.0f0 #0.99f0
+p = 0.0f0 #0.95f0
 gamma = y
 
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 60000
+update_freq = 6000
 
 critic_frozen_update_freq = 4
-actor_update_freq = 1
+actor_update_freq = 2
 
 
 learning_rate = 5e-5
 learning_rate_critic = 2e-4
 n_epochs = 5
-n_microbatches = 300
-actorbatch_size = 40
+n_microbatches = 100
+actorbatch_size = 60
 logσ_is_network = false
 max_σ = 1.0f0
-entropy_loss_weight = 0.01
+entropy_loss_weight = 0.0f0 #0.0001
 clip_grad = 0.5
-target_kl = 0.01 #0.001
+target_kl = Inf #0.001
 clip1 = false
-start_logσ = -0.6
+start_logσ = -0.3
 tanh_end = true
 clip_range = 0.1f0
-clip_range_vf = 0.2f0
+clip_range_vf = nothing #0.2f0
 
 betas = (0.9, 0.99)
 noise = nothing #"perlin"
@@ -89,6 +89,8 @@ fear_scale = 0.4
 new_loss = false#true
 adaptive_weights = true
 critic2_takes_action = true
+
+reward_shaping = false
 
 
 wind_only = false
@@ -248,7 +250,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         push!(mus, μ)
 
         temp_state = deepcopy(env.state)
-        env(action)
+        env(action; reward_shaping = reward_shaping)
 
         push!(terminals, env.done)
 
@@ -318,6 +320,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     elseif gae
 
         deltas = results_run["rewards"] .+ values2 .* (1 .- terminals) .- values
+        
 
         global y, p
         advantages, returns = generalized_advantage_estimation(
@@ -352,6 +355,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         
         push!(to_plot, scatter(x=xx, y=values, name="Values", yaxis = "y2"))
         push!(to_plot, scatter(x=xx, y=values2, name="Next Values", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
     else
         push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
     end

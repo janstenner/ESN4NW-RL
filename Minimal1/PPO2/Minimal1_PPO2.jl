@@ -86,6 +86,7 @@ fear_scale = 0.4
 new_loss = true
 adaptive_weights = true
 
+reward_shaping = false
 
 wind_only = false
 

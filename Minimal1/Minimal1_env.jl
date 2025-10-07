@@ -29,6 +29,9 @@ t0 = 0.0
 min_best_episode = 1
 
 
+# default - will be overwritten in most training scripts
+reward_shaping = true
+
 
 
 # action vector dim - contains the percentage of maximum power the HPC in the turbine will use for the duration of next time step
@@ -208,7 +211,7 @@ end
 
 reward_scale_factor = 100
 
-function calculate_day(action, env, step = nothing; reward_shaping = true)
+function calculate_day(action, env, step = nothing; reward_shaping = reward_shaping)
     global curtailment_threshold, wind, grid_price, history_steps
 
     if !isnothing(env)
@@ -365,7 +368,7 @@ function generate_random_init()
 end
 
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 500, only_wind_steps = 0, json = false, reward_shaping = true, plot_runs = true)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 500, only_wind_steps = 0, json = false, reward_shaping = reward_shaping, plot_runs = true)
     global wind_only, optimal_trajectory
     wind_only = false
     

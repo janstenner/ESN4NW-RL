@@ -82,6 +82,9 @@ noise = nothing#"perlin"
 
 
 normalize_advantage = true
+
+reward_shaping = false
+
 wind_only = false
 
 

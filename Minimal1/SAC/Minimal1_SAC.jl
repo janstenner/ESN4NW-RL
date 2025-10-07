@@ -70,6 +70,7 @@ clip_grad = 0.5
 start_logσ = -1.5
 automatic_entropy_tuning = true
 
+reward_shaping = false
 
 wind_only = false
 
