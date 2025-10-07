@@ -74,13 +74,13 @@ function collect_runs(n = 5; selected_algorithms::Vector{String} = String[])
                         ),
                         "PPO" => Dict(
                             "inner_loops" => 6,
-                            "outer_loops" => 800,
+                            "outer_loops" => 1500,
                             "optimal_trainings" => 1,
                             "num_steps" => 10_000
                         ),
                         "PPO2" => Dict(
-                            "inner_loops" => 6,
-                            "outer_loops" => 800,
+                            "inner_loops" => 3,
+                            "outer_loops" => 1500,
                             "optimal_trainings" => 1,
                             "num_steps" => 10_000
                         ),

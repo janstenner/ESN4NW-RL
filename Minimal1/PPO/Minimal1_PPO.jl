@@ -59,7 +59,7 @@ gamma = y
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 70_000
+update_freq = 60_000
 
 
 learning_rate = 1e-4
