@@ -22,6 +22,7 @@ algorithms = [
     ("SAC", "Minimal1/SAC/Minimal1_SAC.jl"),
     ("PPO", "Minimal1/PPO/Minimal1_PPO.jl"),
     ("PPO2", "Minimal1/PPO2/Minimal1_PPO2.jl"),
+    ("PPO3", "Minimal1/PPO3/Minimal1_PPO3.jl"),
     ("DDPG", "Minimal1/DDPG/Minimal1_DDPG.jl")
 ]
 
@@ -79,6 +80,12 @@ function collect_runs(n = 5; selected_algorithms::Vector{String} = String[])
                             "num_steps" => 10_000
                         ),
                         "PPO2" => Dict(
+                            "inner_loops" => 6,
+                            "outer_loops" => 800,
+                            "optimal_trainings" => 1,
+                            "num_steps" => 10_000
+                        ),
+                        "PPO3" => Dict(
                             "inner_loops" => 6,
                             "outer_loops" => 800,
                             "optimal_trainings" => 1,
@@ -161,6 +168,8 @@ function clean_reconstructed_policies!()
             PPOPolicy
         elseif alg_name == "PPO2"
             PPOPolicy2
+        elseif alg_name == "PPO3"
+            PPOPolicy3
         elseif alg_name == "SAC"
             SACPolicy
         elseif alg_name == "DDPG"
@@ -332,6 +341,8 @@ function plot_validation_comparison()
                 [98, 150, 209]   # Brighter steel blue
             elseif alg == "PPO2"
                 [139, 173, 115]  # Livelier sage green
+            elseif alg == "PPO3"
+                [65, 105, 225]   # Royal blue
             else  # DDPG
                 [168, 119, 175]  # Brighter purple
             end
