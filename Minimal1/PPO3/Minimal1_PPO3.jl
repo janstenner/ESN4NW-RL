@@ -53,7 +53,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.0f0 #0.95f0
+p = 0.8f0 #0.95f0
 gamma = y
 
 start_steps = -1
@@ -69,12 +69,12 @@ learning_rate = 5e-5
 learning_rate_critic = 2e-4
 n_epochs = 5
 n_microbatches = 100
-actorbatch_size = 60
+actorbatch_size = 10
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0.0f0 #0.0001
 clip_grad = 0.5
-target_kl = Inf #0.001
+target_kl = Inf
 clip1 = false
 start_logσ = -0.3
 tanh_end = true
@@ -319,8 +319,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         end
     elseif gae
 
-        deltas = results_run["rewards"] .+ values2 .* (1 .- terminals) .- values
-        
+        #deltas = results_run["rewards"] .+ values2 #.* (1 .- terminals) .- values
+        deltas = values2
 
         global y, p
         advantages, returns = generalized_advantage_estimation(

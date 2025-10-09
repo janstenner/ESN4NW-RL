@@ -110,7 +110,15 @@ function collect_runs(n = 5; selected_algorithms::Vector{String} = String[])
 
                     if il_type == "IL"
                         train_params[:optimal_trainings] = default_params[alg_name]["optimal_trainings"]
-                        global optimal_trajectory = trajectories[(alg_name == "SAC" || alg_name == "DDPG") ? "SAC_DDPG" : alg_name][rs_type]
+                        global optimal_trajectory = trajectories[
+                            if alg_name == "SAC" || alg_name == "DDPG"
+                                "SAC_DDPG"
+                            elseif alg_name == "PPO2" || alg_name == "PPO3"
+                                "PPO2"
+                            else
+                                alg_name
+                            end
+                        ][rs_type]
                     else
                         train_params[:optimal_trainings] = 0
                     end

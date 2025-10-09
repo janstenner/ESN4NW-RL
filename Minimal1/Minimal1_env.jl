@@ -23,6 +23,9 @@ n_windCORES = 1
 n_turbines = 1
 
 
+validation_scores = []
+
+
 te = 1440.0
 dt = 5.0
 t0 = 0.0
@@ -397,7 +400,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
     end
     
     global logs = []
-    global validation_scores = []
+    global validation_scores
     global agent_save = nothing
 
     for j = 1:outer_loops
