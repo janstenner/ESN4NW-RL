@@ -53,7 +53,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.8f0 #0.95f0
+p = 0.0f0 #0.95f0
 gamma = y
 
 start_steps = -1
@@ -176,7 +176,7 @@ optimal_trajectory = trajectories["PPO2"]["with_RS"]
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = true, plot_values = true, plot_critic2 = false, critic2_diagnostics = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = true, plot_values = true, plot_critic2 = false, critic2_diagnostics = false, new_day = true,)
     global history_steps
 
     if show_training_episode
@@ -219,8 +219,29 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     mus = []
     terminals = []
 
-    reset!(env)
-    generate_random_init()
+    if new_day
+        reset!(env)
+        generate_random_init()
+    else
+        reset!(env)
+
+        y0 = create_state(; generate_day = false)
+
+        env.y0 = deepcopy(y0)
+        env.y = deepcopy(y0)
+        env.state = env.featurize(; env = env)
+
+        global day_trajectory = CircularArrayTrajectory(;
+                capacity = 288,
+                state = Float32 => (size(env.state_space)[1], 1),
+                action = Float32 => (size(env.action_space)[1], 1),
+                action_log_prob = Float32 => (1),
+                reward = Float32 => (1),
+                explore_mod = Float32 => (1),
+                terminal = Bool => (1,),
+                next_state = Float32 => (size(env.state_space)[1], 1),
+        )
+    end
 
     while !env.done
 
@@ -233,6 +254,14 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             action = prob_temp.μ
             μ = prob_temp.μ[1]
             σ = prob_temp.σ
+
+            if ndims(action) == 2
+                log_p = vec(sum(normlogpdf(μ, σ, action), dims=1))
+            else
+                log_p = normlogpdf(μ, σ, action)
+            end
+
+            agent.policy.last_action_log_prob = log_p
         end
         
 
@@ -261,6 +290,19 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         end
         push!(results_run["rewards"], env.reward[1])
         push!(results_run["loadleft"], env.y[1])
+
+
+        if !new_day
+            push!(day_trajectory;
+                state = temp_state,
+                action = action,
+                action_log_prob = agent.policy.last_action_log_prob,
+                reward = env.reward[:],
+                explore_mod = 1.0f0,
+                terminal = env.done,
+                next_state = env.state,
+            )
+        end
 
         # println(mean(env.reward))
 
