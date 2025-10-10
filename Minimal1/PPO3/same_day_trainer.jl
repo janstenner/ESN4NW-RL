@@ -442,3 +442,103 @@ function update_complete!(; n_microbatches = 5, update_actor = true, update_crit
 
     println("---")
 end
+
+
+function trajectory_analysis(n = 100)
+    
+    global multiple_day_trajectory = CircularArrayTrajectory(;
+                capacity = 288 * n,
+                state = Float32 => (size(env.state_space)[1], 1),
+                action = Float32 => (size(env.action_space)[1], 1),
+                action_log_prob = Float32 => (1),
+                reward = Float32 => (1),
+                explore_mod = Float32 => (1),
+                terminal = Bool => (1,),
+                next_state = Float32 => (size(env.state_space)[1], 1),
+        )
+
+    for i in 1:n
+        render_run(;
+            new_day = false,
+            exploration = true,
+            return_plot = true, # we dont need to display the plot
+            )
+
+        for j in 1:length(day_trajectory)
+            push!(multiple_day_trajectory[:state], day_trajectory[:state][:,:,j])
+            push!(multiple_day_trajectory[:action], day_trajectory[:action][:,:,j])
+            push!(multiple_day_trajectory[:action_log_prob], day_trajectory[:action_log_prob][:,j])
+            push!(multiple_day_trajectory[:reward], day_trajectory[:reward][:,j])
+            push!(multiple_day_trajectory[:explore_mod], day_trajectory[:explore_mod][:,j])
+            push!(multiple_day_trajectory[:terminal], day_trajectory[:terminal][:,j])
+            push!(multiple_day_trajectory[:next_state], day_trajectory[:next_state][:,:,j])
+        end
+    end
+
+    xx = collect(dt/60:dt/60:te/60)
+
+    γ = agent.policy.γ
+    rewards = collect(multiple_day_trajectory[:reward])
+    terminal = collect(multiple_day_trajectory[:terminal])
+    next_states = flatten_batch(multiple_day_trajectory[:next_state])
+    next_values = reshape( agent.policy.approximator.critic( next_states ), 1, :)
+
+    # calculate real returns for each state
+    returns = zeros(Float32, length(multiple_day_trajectory))
+    for i in length(multiple_day_trajectory):-1:1
+        if terminal[i]
+            returns[i] = rewards[i]
+        else
+            returns[i] = rewards[i] + γ * returns[i+1]
+        end
+    end
+
+    # calculate targets for critic
+    targets = lambda_truncated_targets(rewards, terminal, next_values, γ)[:]
+
+
+
+    # Process states and count visits
+    states_array = multiple_day_trajectory[:state]
+    n_states = size(states_array, 3)  # number of states recorded
+
+    # Create bins for load_left
+    min_load = minimum(states_array[1, 1, :])
+    load_bins = collect(LinRange(min_load,1,200))
+    n_load_bins = length(load_bins)
+    time_bins = 1:288  # Time steps are already discrete 1-288
+
+    # Initialize visitation matrix
+    state_visits = zeros(Int, n_load_bins-1, 288)  # -1 because we're counting intervals between bin edges
+
+    # For each state, increment the appropriate cell in the visitation matrix
+    for i in 1:n_states
+        load_left = states_array[1, 1, i]  # state[1] - load_left value
+        time_step = (i-1) % 288 + 1        # time step (1-288)
+        
+        # Find the appropriate load_left bin
+        load_bin = searchsortedfirst(load_bins, load_left) - 1
+        load_bin = clamp(load_bin, 1, n_load_bins-1)
+        
+        # Increment the visitation count
+        state_visits[load_bin, time_step] += 1
+    end
+
+    # Create heatmap of state visits
+    colorscale2 = [[0.0, "rgb(5, 0, 5)"], [0.01, "rgb(40, 0, 60)"], [0.3, "rgb(160, 0, 200)"], [0.75, "rgb(210, 0, 255)"], [1.0, "rgb(240, 160, 255)"]]
+    layout = Layout(
+        title = "State Visitation Heatmap",
+        xaxis_title = "Time Step",
+        yaxis_title = "Load Left",
+        coloraxis_colorscale = colorscale2
+    )
+
+    heatmap_plot = plot(PlotlyJS.heatmap(
+        x = 1:288,
+        y = load_bins[1:end-1],
+        z = state_visits,
+        coloraxis = "coloraxis"
+    ), layout)
+
+    display(heatmap_plot)
+end

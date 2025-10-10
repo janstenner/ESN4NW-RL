@@ -497,16 +497,16 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         for (i,state) in enumerate(states)
             inputs = vcat(repeat(state, 1, length(actions)), actions')
 
-            mu = agent.policy.approximator.actor.μ(state)[:]
-            mu_value = agent.policy.approximator.critic2(vcat(state, mu))
-            mu_values = mu_value .* ones(length(actions))
+            #mu = agent.policy.approximator.actor.μ(state)[:]
+            #mu_value = agent.policy.approximator.critic2(vcat(state, mu))
+            #mu_values = mu_value .* ones(length(actions))
 
             critic2_values = agent.policy.approximator.critic2(inputs)[:] #-1 first
 
-            results_critic2[:,i] = critic2_values - mu_values
+            results_critic2[:,i] = critic2_values #- mu_values
         end
 
-        results_critic2 = (results_critic2 .- mean(results_critic2)) ./ clamp(std(results_critic2), 1e-8, 1000.0)
+        #results_critic2 = (results_critic2 .- mean(results_critic2)) ./ clamp(std(results_critic2), 1e-8, 1000.0)
 
         min_val = - maximum(abs.(results_critic2))
 
@@ -519,12 +519,15 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
                 results_critic2[idx2,i] = -min_val
             else
                 idx = clamp(searchsortedfirst(actions, mus[i]), 1, length(actions))
+
+                idx2 = findmax(results_critic2[:,i])[2]
+                results_critic2[idx2,i] = -min_val
             end
 
             results_critic2[idx,i] = min_val
         end
 
-        display(plot(heatmap(x = xx, y = actions, z=results_critic2, coloraxis="coloraxis"), layout))
+        display(plot(PlotlyJS.heatmap(x = xx, y = actions, z=results_critic2, coloraxis="coloraxis"), layout))
 
     end
 end
