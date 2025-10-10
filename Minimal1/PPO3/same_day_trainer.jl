@@ -444,7 +444,7 @@ function update_complete!(; n_microbatches = 5, update_actor = true, update_crit
 end
 
 
-function trajectory_analysis(n = 100)
+function trajectory_analysis(n = 100; normalize = true)
     
     global multiple_day_trajectory = CircularArrayTrajectory(;
                 capacity = 288 * n,
@@ -480,6 +480,8 @@ function trajectory_analysis(n = 100)
     γ = agent.policy.γ
     rewards = collect(multiple_day_trajectory[:reward])
     terminal = collect(multiple_day_trajectory[:terminal])
+    states = flatten_batch(multiple_day_trajectory[:state])
+    values = reshape( agent.policy.approximator.critic( states ), 1, :)
     next_states = flatten_batch(multiple_day_trajectory[:next_state])
     next_values = reshape( agent.policy.approximator.critic( next_states ), 1, :)
 
@@ -510,6 +512,9 @@ function trajectory_analysis(n = 100)
 
     # Initialize visitation matrix
     state_visits = zeros(Int, n_load_bins-1, 288)  # -1 because we're counting intervals between bin edges
+    state_returns = ones(Float32, n_load_bins-1, 288) .* minimum(returns)
+    state_targets = ones(Float32, n_load_bins-1, 288) .* minimum(targets)
+    state_values = ones(Float32, n_load_bins-1, 288) .* minimum(values)
 
     # For each state, increment the appropriate cell in the visitation matrix
     for i in 1:n_states
@@ -521,24 +526,115 @@ function trajectory_analysis(n = 100)
         load_bin = clamp(load_bin, 1, n_load_bins-1)
         
         # Increment the visitation count
+        if state_visits[load_bin, time_step] == 0
+            first = true
+        else
+            first = false
+        end
+
         state_visits[load_bin, time_step] += 1
+        if first
+            state_returns[load_bin, time_step] = returns[i]
+            state_targets[load_bin, time_step] = targets[i]
+            state_values[load_bin, time_step] = values[i]
+        else
+            state_returns[load_bin, time_step] += returns[i]
+            state_targets[load_bin, time_step] += targets[i]
+            state_values[load_bin, time_step] += values[i]
+        end
     end
 
-    # Create heatmap of state visits
-    colorscale2 = [[0.0, "rgb(5, 0, 5)"], [0.01, "rgb(40, 0, 60)"], [0.3, "rgb(160, 0, 200)"], [0.75, "rgb(210, 0, 255)"], [1.0, "rgb(240, 160, 255)"]]
+    state_returns ./= state_visits .+ (state_visits .== 0) # avoid NaN
+    state_targets ./= state_visits .+ (state_visits .== 0)
+    state_values ./= state_visits .+ (state_visits .== 0)
+
+    if normalize
+        # Normalize each time step independently for each matrix
+        for t in 1:288
+            # For returns
+            min_val = minimum(state_returns[state_visits[:, t] .> 0, t])
+            max_val = maximum(state_returns[state_visits[:, t] .> 0, t])
+            if min_val != max_val
+                state_returns[:, t] = (state_returns[:, t] .- min_val) ./ (max_val - min_val)
+            end
+
+            # For targets
+            min_val = minimum(state_targets[state_visits[:, t] .> 0, t])
+            max_val = maximum(state_targets[state_visits[:, t] .> 0, t])
+            if min_val != max_val
+                state_targets[:, t] = (state_targets[:, t] .- min_val) ./ (max_val - min_val)
+            end
+
+            # For values
+            min_val = minimum(state_values[state_visits[:, t] .> 0, t])
+            max_val = maximum(state_values[state_visits[:, t] .> 0, t])
+            if min_val != max_val
+                state_values[:, t] = (state_values[:, t] .- min_val) ./ (max_val - min_val)
+            end
+        end
+
+        state_returns[state_visits .== 0, :] .= -0.2
+        state_targets[state_visits .== 0, :] .= -0.2
+        state_values[state_visits .== 0, :] .= -0.2
+    end
+
+    # Create color scales
+    colorscale1 = [[0.0, "rgb(5, 0, 5)"], [0.01, "rgb(40, 0, 60)"], [0.3, "rgb(160, 0, 200)"], [0.75, "rgb(210, 0, 255)"], [1.0, "rgb(240, 160, 255)"]]
+    colorscale2 = [[0.0, "rgb(5, 0, 5)"], [0.1, "rgb(200, 0, 0)"], [0.5, "rgb(210, 210, 0)"], [0.75, "rgb(0, 210, 0)"], [1.0, "rgb(140, 255, 255)"]]
+
+    # Create subplots layout
     layout = Layout(
-        title = "State Visitation Heatmap",
-        xaxis_title = "Time Step",
-        yaxis_title = "Load Left",
-        coloraxis_colorscale = colorscale2
+        grid=attr(rows=2, columns=2, pattern="independent", rowgap=0.01, colgap=0.01),
+        title="State Analysis Heatmaps",
+        width=1200,
+        height=1000,
+        showlegend=false,
+        margin=attr(t=50, pad=0),
+        annotations=[
+            attr(text="State Visits", x=0.05, y=0.6, xref="paper", yref="paper", showarrow=false, font_size=16),
+            attr(text="State Returns", x=0.7, y=0.6, xref="paper", yref="paper", showarrow=false, font_size=16),
+            attr(text="State Targets", x=0.05, y=0.01, xref="paper", yref="paper", showarrow=false, font_size=16),
+            attr(text="State Values", x=0.7, y=0.01, xref="paper", yref="paper", showarrow=false, font_size=16)
+        ]
     )
 
-    heatmap_plot = plot(PlotlyJS.heatmap(
-        x = 1:288,
-        y = load_bins[1:end-1],
-        z = state_visits,
-        coloraxis = "coloraxis"
-    ), layout)
+    # Create all four heatmaps
+    heatmap1 = plot(PlotlyJS.heatmap(
+        x=1:288, y=load_bins[1:end-1], z=state_visits,
+        colorscale=colorscale1,
+        showscale = false,
+        colorbar=attr(title="Visits", x=0.45, y=0.9),
+        name="State Visits"
+    ))
 
-    display(heatmap_plot)
+    heatmap2 = plot(PlotlyJS.heatmap(
+        x=1:288, y=load_bins[1:end-1], z=state_returns,
+        colorscale=colorscale2,
+        showscale = false,
+        colorbar=attr(title="Returns", x=0.95, y=0.9),
+        name="State Returns"
+    ))
+
+    heatmap3 = plot(PlotlyJS.heatmap(
+        x=1:288, y=load_bins[1:end-1], z=state_targets,
+        colorscale=colorscale2,
+        showscale = false,
+        colorbar=attr(title="Targets", x=0.45, y=0.2),
+        name="State Targets"
+    ))
+
+    heatmap4 = plot(PlotlyJS.heatmap(
+        x=1:288, y=load_bins[1:end-1], z=state_values,
+        colorscale=colorscale2,
+        showscale = false,
+        colorbar=attr(title="Values", x=0.95, y=0.2),
+        name="State Values"
+    ))
+
+    # Create and display the combined plot
+    fig = [heatmap1 heatmap2; heatmap3 heatmap4]
+
+    relayout!(fig, layout.fields)
+
+    display(fig)
 end
