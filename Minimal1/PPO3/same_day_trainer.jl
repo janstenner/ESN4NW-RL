@@ -1,11 +1,11 @@
 using Zygote:ignore
 
 
-function train_same_day(n = 100; n_microbatches = 5, update_actor = true, update_critic = true)
+function train_same_day(n = 100; n_microbatches = 5, update_actor = true, update_critic = true, show_plots = false)
 
     agent.policy.update_step = 0
 
-    render_run(; new_day = false, exploration = true)
+    render_run(; new_day = false, exploration = true, return_plot = !show_plots)
 
     for i in 1:n
 
@@ -13,8 +13,10 @@ function train_same_day(n = 100; n_microbatches = 5, update_actor = true, update
 
         update_complete!(; n_microbatches = n_microbatches, update_actor = update_actor, update_critic = update_critic)
 
-        render_run(; new_day = false, exploration = true)
+        render_run(; new_day = false, exploration = true, return_plot = !show_plots)
     end
+
+    println("Training complete")
 end
 
 
@@ -444,7 +446,7 @@ function update_complete!(; n_microbatches = 5, update_actor = true, update_crit
 end
 
 
-function trajectory_analysis(n = 100; normalize = true)
+function trajectory_analysis(n = 100; normalize = false, substract_min = false)
     
     global multiple_day_trajectory = CircularArrayTrajectory(;
                 capacity = 288 * n,
@@ -478,10 +480,13 @@ function trajectory_analysis(n = 100; normalize = true)
     xx = collect(dt/60:dt/60:te/60)
 
     γ = agent.policy.γ
+    λ = agent.policy.λ
     rewards = collect(multiple_day_trajectory[:reward])
     terminal = collect(multiple_day_trajectory[:terminal])
     states = flatten_batch(multiple_day_trajectory[:state])
+    actions = flatten_batch(multiple_day_trajectory[:action])
     values = reshape( agent.policy.approximator.critic( states ), 1, :)
+    critic2_values = reshape( agent.policy.approximator.critic2( vcat(states, actions) ), 1, :)
     next_states = flatten_batch(multiple_day_trajectory[:next_state])
     next_values = reshape( agent.policy.approximator.critic( next_states ), 1, :)
 
@@ -497,7 +502,22 @@ function trajectory_analysis(n = 100; normalize = true)
 
     # calculate targets for critic
     targets = lambda_truncated_targets(rewards, terminal, next_values, γ)[:]
+    #targets = nstep_targets(rewards, terminal, next_values, γ; n=5)[:]
 
+    # calculate targets for critic2
+    critic2_targets = special_targets_ppo3(rewards, terminal, values, next_values, γ)[:]
+    #critic2_targets = special_targets_ppo3(rewards[:], terminal[:], values[:], circshift(returns, -1), γ)[:]
+
+    # advantages, returns = generalized_advantage_estimation(
+    #     rewards,
+    #     values,
+    #     next_values,
+    #     γ,
+    #     λ;
+    #     dims=2,
+    #     terminal=terminal
+    # )
+    # targets = advantages .+ values
 
 
     # Process states and count visits
@@ -509,22 +529,30 @@ function trajectory_analysis(n = 100; normalize = true)
     load_bins = collect(LinRange(min_load,1,200))
     n_load_bins = length(load_bins)
     time_bins = 1:288  # Time steps are already discrete 1-288
-
     # Initialize visitation matrix
     state_visits = zeros(Int, n_load_bins-1, 288)  # -1 because we're counting intervals between bin edges
     state_returns = ones(Float32, n_load_bins-1, 288) .* minimum(returns)
     state_targets = ones(Float32, n_load_bins-1, 288) .* minimum(targets)
     state_values = ones(Float32, n_load_bins-1, 288) .* minimum(values)
 
+    min_action = minimum(actions[1, :])
+    max_action = maximum(actions[1, :])
+    action_bins = collect(LinRange(min_action, max_action, 200))
+    n_action_bins = length(action_bins)
+
+    critic2_visits = zeros(Int, n_action_bins-1, 288)
+    state_critic2_values = ones(Float32, n_action_bins-1, 288) .* minimum(critic2_values)
+    state_critic2_targets = ones(Float32, n_action_bins-1, 288) .* minimum(critic2_targets)
+
     # For each state, increment the appropriate cell in the visitation matrix
     for i in 1:n_states
         load_left = states_array[1, 1, i]  # state[1] - load_left value
-        time_step = (i-1) % 288 + 1        # time step (1-288)
+        time_step = round(Int, states_array[end, 1, i] * te / dt + 1)        # time step (1-288)
         
         # Find the appropriate load_left bin
         load_bin = searchsortedfirst(load_bins, load_left) - 1
         load_bin = clamp(load_bin, 1, n_load_bins-1)
-        
+
         # Increment the visitation count
         if state_visits[load_bin, time_step] == 0
             first = true
@@ -542,40 +570,97 @@ function trajectory_analysis(n = 100; normalize = true)
             state_targets[load_bin, time_step] += targets[i]
             state_values[load_bin, time_step] += values[i]
         end
+
+
+        # Find the appropriate action bin
+        action_bin = searchsortedfirst(action_bins, actions[i]) - 1
+        action_bin = clamp(action_bin, 1, n_action_bins-1)
+
+        # Increment the visitation count
+        if critic2_visits[action_bin, time_step] == 0
+            first_critic2 = true
+        else
+            first_critic2 = false
+        end
+
+        critic2_visits[action_bin, time_step] += 1
+        if first_critic2
+            state_critic2_values[action_bin, time_step] = critic2_values[i]
+            state_critic2_targets[action_bin, time_step] = critic2_targets[i]
+        else
+            state_critic2_values[action_bin, time_step] += critic2_values[i]
+            state_critic2_targets[action_bin, time_step] += critic2_targets[i]
+        end
     end
 
     state_returns ./= state_visits .+ (state_visits .== 0) # avoid NaN
     state_targets ./= state_visits .+ (state_visits .== 0)
     state_values ./= state_visits .+ (state_visits .== 0)
 
-    if normalize
+    state_critic2_values ./= critic2_visits .+ (critic2_visits .== 0)
+    state_critic2_targets ./= critic2_visits .+ (critic2_visits .== 0)
+
+    if normalize || substract_min
         # Normalize each time step independently for each matrix
         for t in 1:288
             # For returns
             min_val = minimum(state_returns[state_visits[:, t] .> 0, t])
             max_val = maximum(state_returns[state_visits[:, t] .> 0, t])
             if min_val != max_val
-                state_returns[:, t] = (state_returns[:, t] .- min_val) ./ (max_val - min_val)
+                state_returns[:, t] = (state_returns[:, t] .- min_val)
+                if normalize
+                    state_returns[:, t] ./= (max_val - min_val)
+                end
             end
 
             # For targets
             min_val = minimum(state_targets[state_visits[:, t] .> 0, t])
             max_val = maximum(state_targets[state_visits[:, t] .> 0, t])
             if min_val != max_val
-                state_targets[:, t] = (state_targets[:, t] .- min_val) ./ (max_val - min_val)
+                state_targets[:, t] = (state_targets[:, t] .- min_val)
+                if normalize
+                    state_targets[:, t] ./= (max_val - min_val)
+                end
             end
 
             # For values
             min_val = minimum(state_values[state_visits[:, t] .> 0, t])
             max_val = maximum(state_values[state_visits[:, t] .> 0, t])
             if min_val != max_val
-                state_values[:, t] = (state_values[:, t] .- min_val) ./ (max_val - min_val)
+                state_values[:, t] = (state_values[:, t] .- min_val)
+                if normalize
+                    state_values[:, t] ./= (max_val - min_val)
+                end
             end
+
+            # For critic2_values
+            min_val = minimum(state_critic2_values[critic2_visits[:, t] .> 0, t])
+            max_val = maximum(state_critic2_values[critic2_visits[:, t] .> 0, t])
+            if min_val != max_val
+                state_critic2_values[:, t] = (state_critic2_values[:, t] .- min_val)
+                if normalize
+                    state_critic2_values[:, t] ./= (max_val - min_val)
+                end
+            end
+
+            # For critic2_targets
+            min_val = minimum(state_critic2_targets[critic2_visits[:, t] .> 0, t])
+            max_val = maximum(state_critic2_targets[critic2_visits[:, t] .> 0, t])
+            if min_val != max_val
+                state_critic2_targets[:, t] = (state_critic2_targets[:, t] .- min_val)
+                if normalize
+                    state_critic2_targets[:, t] ./= (max_val - min_val)
+                end
+            end
+
         end
 
         state_returns[state_visits .== 0, :] .= -0.2
         state_targets[state_visits .== 0, :] .= -0.2
         state_values[state_visits .== 0, :] .= -0.2
+
+        state_critic2_values[critic2_visits .== 0, :] .= -0.2
+        state_critic2_targets[critic2_visits .== 0, :] .= -0.2
     end
 
     # Create color scales
@@ -586,15 +671,17 @@ function trajectory_analysis(n = 100; normalize = true)
     layout = Layout(
         grid=attr(rows=2, columns=2, pattern="independent", rowgap=0.01, colgap=0.01),
         title="State Analysis Heatmaps",
-        width=1200,
-        height=1000,
+        # width=1200,
+        # height=1000,
         showlegend=false,
         margin=attr(t=50, pad=0),
         annotations=[
-            attr(text="State Visits", x=0.05, y=0.6, xref="paper", yref="paper", showarrow=false, font_size=16),
-            attr(text="State Returns", x=0.7, y=0.6, xref="paper", yref="paper", showarrow=false, font_size=16),
-            attr(text="State Targets", x=0.05, y=0.01, xref="paper", yref="paper", showarrow=false, font_size=16),
-            attr(text="State Values", x=0.7, y=0.01, xref="paper", yref="paper", showarrow=false, font_size=16)
+            attr(text="State Visits", x=0.05, y=0.715, xref="paper", yref="paper", showarrow=false, font_size=16),
+            attr(text="State Returns", x=0.7, y=0.715, xref="paper", yref="paper", showarrow=false, font_size=16),
+            attr(text="State Targets", x=0.05, y=0.325, xref="paper", yref="paper", showarrow=false, font_size=16),
+            attr(text="State Values", x=0.7, y=0.325, xref="paper", yref="paper", showarrow=false, font_size=16),
+            attr(text="Critic2 Targets", x=0.05, y=-0.05, xref="paper", yref="paper", showarrow=false, font_size=16),
+            attr(text="Critic2 Values", x=0.7, y=-0.05, xref="paper", yref="paper", showarrow=false, font_size=16),
         ]
     )
 
@@ -631,8 +718,24 @@ function trajectory_analysis(n = 100; normalize = true)
         name="State Values"
     ))
 
+    heatmap5 = plot(PlotlyJS.heatmap(
+        x=1:288, y=action_bins[1:end-1], z=state_critic2_targets,
+        colorscale=colorscale2,
+        showscale = false,
+        colorbar=attr(title="Critic2 Targets", x=0.95, y=0.2),
+        name="Critic2 Targets"
+    ))
+
+    heatmap6 = plot(PlotlyJS.heatmap(
+        x=1:288, y=action_bins[1:end-1], z=state_critic2_values,
+        colorscale=colorscale2,
+        showscale = false,
+        colorbar=attr(title="Critic2 Values", x=0.95, y=0.2),
+        name="Critic2 Values"
+    ))
+
     # Create and display the combined plot
-    fig = [heatmap1 heatmap2; heatmap3 heatmap4]
+    fig = [heatmap1 heatmap2; heatmap3 heatmap4; heatmap5 heatmap6]
 
     relayout!(fig, layout.fields)
 
