@@ -26,6 +26,7 @@ dirpath = string(@__DIR__)
 open(dirpath * "/.gitignore", "w") do io
     println(io, "training_frames/*")
     #println(io, "saves/*")
+    println(io, "training.mp4")
 end
 
 
@@ -89,8 +90,10 @@ fear_scale = 0.4
 new_loss = false#true
 adaptive_weights = true
 critic2_takes_action = true
+use_popart = false
+critic_frozen_factor = 0.4f0
 
-reward_shaping = false
+reward_shaping = true
 
 
 wind_only = false
@@ -153,7 +156,9 @@ function initialize_setup(;use_random_init = false)
                 fear_scale = fear_scale,
                 new_loss = new_loss,
                 adaptive_weights = adaptive_weights,
-                critic2_takes_action = critic2_takes_action,)
+                critic2_takes_action = critic2_takes_action,
+                use_popart = use_popart,
+                critic_frozen_factor = critic_frozen_factor,)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
