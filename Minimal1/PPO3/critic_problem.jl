@@ -61,18 +61,7 @@ function load_critic_snapshot!(path::AbstractString=CRITIC_SNAPSHOT_PATH)
 end
 
 
-# Pre-activation residual block: LN -> GELU -> Dense -> GELU -> Dense + skip
-struct ResMLPBlock
-    ln1::LayerNorm
-    d1::Dense
-    ln2::LayerNorm
-    d2::Dense
-end
-ResMLPBlock(width::Int) = ResMLPBlock(
-    LayerNorm(width), Dense(width, width, gelu),
-    LayerNorm(width), Dense(width, width, gelu),
-)
-(m::ResMLPBlock)(x) = x .+ m.d2(m.ln2(m.d1(m.ln1(x))))
+
 
 # Critic: input 10-dim → widen → a few residual blocks → linear head
 function make_critic(; in_dim=10, width=128, blocks=4)
@@ -99,8 +88,8 @@ function train_one(epochs = 5, batch_count = 100)
     next_values_compare = reshape( critic_compare( next_states ), 1, :)
 
     γ = gamma
-    global targets = lambda_truncated_targets(rewards, terminal, next_values, γ)[:]
-    global targets_compare = lambda_truncated_targets(rewards, terminal, next_values_compare, γ)[:]
+    global targets = lambda_truncated_targets(rewards, terminal, next_values, γ; λ = 0.8f0, n = 8)[:]
+    global targets_compare = lambda_truncated_targets(rewards, terminal, next_values_compare, γ; λ = 0.8f0, n = 8)[:]
 
     global values_before = critic(states_array)
     global values_compare_before = critic_compare(states_array)
@@ -230,7 +219,8 @@ function train_one(epochs = 5, batch_count = 100)
     ))
 
     sub = abs.(state_values - state_targets)
-    sub[state_visits .== 0] .= 0.0f0
+    sub = state_returns - state_values
+    sub[state_visits .== 0] .= minimum(sub)
 
     heatmap5 = plot(PlotlyJS.heatmap(
         x=1:288, y=load_bins[1:end-1], z=sub,

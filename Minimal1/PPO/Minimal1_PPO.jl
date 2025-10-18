@@ -191,7 +191,7 @@ optimal_trajectory = trajectories["PPO"]["with_RS"]
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false, plot_values = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = false, plot_values = true)
     global history_steps
 
     if show_training_episode
@@ -250,7 +250,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
         push!(values, agent.policy.approximator.critic(env.state)[1])
 
-        env(action)
+        env(action; reward_shaping = reward_shaping)
 
         push!(next_values, agent.policy.approximator.critic(env.state)[1])
 
@@ -343,7 +343,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
     if plot_values
         push!(to_plot, scatter(x=xx, y=values, name="Critic Value", yaxis = "y2"))
-        push!(to_plot, scatter(x=xx, y=returns, name="Return", yaxis = "y2"))
+        #push!(to_plot, scatter(x=xx, y=returns, name="Return", yaxis = "y2"))
     end
 
     push!(to_plot, scatter(x=xx, y=results_run["loadleft"], name="Load Left"))

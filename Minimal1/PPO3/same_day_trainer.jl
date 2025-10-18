@@ -1,20 +1,55 @@
 using Zygote:ignore
 using JSON, CodecZlib
 
+λ_targets = agent.policy.λ_targets
+n_targets = agent.policy.n_targets
 
-function train_same_day(n = 100; n_microbatches = 5, update_actor = true, update_critic = true, show_plots = false, time_step_interval = [1,288])
+function train_same_day(n = 100, days_per_trajectory = 10; minibatch_size = 60, update_actor = true, update_critic = true, show_plots = false, time_step_interval = [1,288], inline_trajectory_analysis = false)
 
     agent.policy.update_step = 0
 
-    render_run(; new_day = false, exploration = true, return_plot = !show_plots)
 
     for i in 1:n
 
+        global multiple_day_trajectory = CircularArrayTrajectory(;
+                capacity = 288 * days_per_trajectory,
+                state = Float32 => (size(env.state_space)[1], 1),
+                action = Float32 => (size(env.action_space)[1], 1),
+                action_log_prob = Float32 => (1),
+                reward = Float32 => (1),
+                explore_mod = Float32 => (1),
+                terminal = Bool => (1,),
+                next_state = Float32 => (size(env.state_space)[1], 1),
+        )
+
+        for i in 1:days_per_trajectory
+            render_run(;
+                new_day = false,
+                exploration = true,
+                return_plot = !show_plots,
+                )
+
+            for j in 1:length(day_trajectory)
+                push!(multiple_day_trajectory[:state], day_trajectory[:state][:,:,j])
+                push!(multiple_day_trajectory[:action], day_trajectory[:action][:,:,j])
+                push!(multiple_day_trajectory[:action_log_prob], day_trajectory[:action_log_prob][:,j])
+                push!(multiple_day_trajectory[:reward], day_trajectory[:reward][:,j])
+                push!(multiple_day_trajectory[:explore_mod], day_trajectory[:explore_mod][:,j])
+                push!(multiple_day_trajectory[:terminal], day_trajectory[:terminal][:,j])
+                push!(multiple_day_trajectory[:next_state], day_trajectory[:next_state][:,:,j])
+            end
+        end
+
         agent.policy.update_step += agent.policy.update_freq
 
-        update_complete!(; n_microbatches = n_microbatches, update_actor = update_actor, update_critic = update_critic, time_step_interval = time_step_interval)
+        update_complete!(minibatch_size, multiple_day_trajectory; update_actor = update_actor, update_critic = update_critic, time_step_interval = time_step_interval)
 
-        render_run(; new_day = false, exploration = true, return_plot = !show_plots)
+        if inline_trajectory_analysis
+            fig = trajectory_analysis(0; normalize=true, full_y_axis=true)
+            display(fig)
+            fig = trajectory_analysis(0; normalize=false, full_y_axis=true)
+            display(fig)
+        end
     end
 
     println("Training complete")
@@ -22,9 +57,8 @@ end
 
 
 
-function update_complete!(; n_microbatches = 5, update_actor = true, update_critic = true, time_step_interval = [1,288])
+function update_complete!(minibatch_size = 60, t = day_trajectory; update_actor = true, update_critic = true, time_step_interval = [1,288])
     p = agent.policy
-    t = day_trajectory
 
 
 
@@ -33,7 +67,7 @@ function update_complete!(; n_microbatches = 5, update_actor = true, update_crit
     γ = p.γ
     λ = p.λ
     n_epochs = p.n_epochs
-    #n_microbatches = p.n_microbatches
+    #n_minibatches = p.n_minibatches
     clip_range = p.clip_range
     clip_range_vf = p.clip_range_vf
     w₁ = p.actor_loss_weight
@@ -57,7 +91,8 @@ function update_complete!(; n_microbatches = 5, update_actor = true, update_crit
 
     n_samples = length(valid_indices)
 
-    microbatch_size = Int(floor(n_samples ÷ n_microbatches))
+    minibatch_size = min(minibatch_size, n_samples)
+    n_minibatches = Int(floor(n_samples ÷ minibatch_size))
     actorbatch_size = p.actorbatch_size
 
     # Select states only from valid time steps
@@ -132,6 +167,10 @@ function update_complete!(; n_microbatches = 5, update_actor = true, update_crit
         AC.critic2_state_tree = Flux.setup(AC.optimizer_critic2, AC.critic2)
     end
 
+    # AC.critic_state_tree = Flux.setup(AC.optimizer_critic, AC.critic)
+    # AC.critic2_state_tree = Flux.setup(AC.optimizer_critic2, AC.critic2)
+    # Optimisers.adjust!(AC.critic_state_tree.layers[end]; lambda = 0.0)
+    # Optimisers.adjust!(AC.critic2_state_tree.layers[end]; lambda = 0.0)
 
 
     next_states = to_device(flatten_batch(t[:next_state]))
@@ -142,34 +181,22 @@ function update_complete!(; n_microbatches = 5, update_actor = true, update_crit
 
 
     next_values = reshape( AC.critic( next_states ), n_envs, :)
-    #targets = lambda_truncated_targets(rewards, terminal, next_values, γ)[:]
-    targets = nstep_targets(rewards, terminal, next_values, γ)[:]
-    nstep_targets
-
-    #targets for critic2 now below
+    targets = lambda_truncated_targets(rewards, terminal, next_values, γ; λ = λ_targets, n = n_targets)[:]
+    #targets = nstep_targets(rewards, terminal, next_values, γ)[:]
 
 
     collector = BatchQuantileCollector()
     
 
-    # states_flatten_on_host = select_last_dim(states_flatten_on_host, valid_indices)
-    # actions_flatten = select_last_dim(actions_flatten, valid_indices)
-    # explore_mod = select_last_dim(explore_mod, valid_indices)
-    # action_log_probs = select_last_dim(action_log_probs, valid_indices)
-    # advantages = select_last_dim(advantages, valid_indices)
-    # v_ref = select_last_dim(v_ref, valid_indices)
-    # q_ref = select_last_dim(q_ref, valid_indices)
-    # targets = select_last_dim(targets, valid_indices)
-    # values = select_last_dim(values, valid_indices)
 
     for epoch in 1:n_epochs
 
         rand_inds = shuffle!(rng, valid_indices)
         #rand_inds_actor = shuffle!(rng, Vector(1:n_envs*n_rollout-actorbatch_size))
 
-        for i in 1:n_microbatches
+        for i in 1:n_minibatches
 
-            inds = rand_inds[(i-1)*microbatch_size+1:i*microbatch_size]
+            inds = rand_inds[(i-1)*minibatch_size+1:i*minibatch_size]
 
             #inds_actor = collect(rand_inds_actor[i]:rand_inds_actor[i]+actorbatch_size-1)
             inds_actor = inds[1:clamp(actorbatch_size, 1, length(inds))]
@@ -316,9 +343,9 @@ function update_complete!(; n_microbatches = 5, update_actor = true, update_crit
 
         rand_inds = shuffle!(rng, valid_indices)
 
-        for i in 1:n_microbatches
+        for i in 1:n_minibatches
 
-            inds = rand_inds[(i-1)*microbatch_size+1:i*microbatch_size]
+            inds = rand_inds[(i-1)*minibatch_size+1:i*minibatch_size]
 
             s = to_device(collect(select_last_dim(states_flatten_on_host, inds)))
             a = to_device(collect(select_last_dim(actions_flatten, inds)))
@@ -472,35 +499,39 @@ end
 
 
 function trajectory_analysis(n = 100; normalize = false, substract_min = false, full_y_axis = false)
-    
-    global multiple_day_trajectory = CircularArrayTrajectory(;
-                capacity = 288 * n,
-                state = Float32 => (size(env.state_space)[1], 1),
-                action = Float32 => (size(env.action_space)[1], 1),
-                action_log_prob = Float32 => (1),
-                reward = Float32 => (1),
-                explore_mod = Float32 => (1),
-                terminal = Bool => (1,),
-                next_state = Float32 => (size(env.state_space)[1], 1),
-        )
+    global multiple_day_trajectory
 
-    for i in 1:n
-        render_run(;
-            new_day = false,
-            exploration = true,
-            return_plot = true, # we dont need to display the plot
+    if n>0
+        multiple_day_trajectory = CircularArrayTrajectory(;
+                    capacity = 288 * n,
+                    state = Float32 => (size(env.state_space)[1], 1),
+                    action = Float32 => (size(env.action_space)[1], 1),
+                    action_log_prob = Float32 => (1),
+                    reward = Float32 => (1),
+                    explore_mod = Float32 => (1),
+                    terminal = Bool => (1,),
+                    next_state = Float32 => (size(env.state_space)[1], 1),
             )
 
-        for j in 1:length(day_trajectory)
-            push!(multiple_day_trajectory[:state], day_trajectory[:state][:,:,j])
-            push!(multiple_day_trajectory[:action], day_trajectory[:action][:,:,j])
-            push!(multiple_day_trajectory[:action_log_prob], day_trajectory[:action_log_prob][:,j])
-            push!(multiple_day_trajectory[:reward], day_trajectory[:reward][:,j])
-            push!(multiple_day_trajectory[:explore_mod], day_trajectory[:explore_mod][:,j])
-            push!(multiple_day_trajectory[:terminal], day_trajectory[:terminal][:,j])
-            push!(multiple_day_trajectory[:next_state], day_trajectory[:next_state][:,:,j])
+        for i in 1:n
+            render_run(;
+                new_day = false,
+                exploration = true,
+                return_plot = true, # we dont need to display the plot
+                )
+
+            for j in 1:length(day_trajectory)
+                push!(multiple_day_trajectory[:state], day_trajectory[:state][:,:,j])
+                push!(multiple_day_trajectory[:action], day_trajectory[:action][:,:,j])
+                push!(multiple_day_trajectory[:action_log_prob], day_trajectory[:action_log_prob][:,j])
+                push!(multiple_day_trajectory[:reward], day_trajectory[:reward][:,j])
+                push!(multiple_day_trajectory[:explore_mod], day_trajectory[:explore_mod][:,j])
+                push!(multiple_day_trajectory[:terminal], day_trajectory[:terminal][:,j])
+                push!(multiple_day_trajectory[:next_state], day_trajectory[:next_state][:,:,j])
+            end
         end
     end
+
 
     xx = collect(dt/60:dt/60:te/60)
 
@@ -526,13 +557,13 @@ function trajectory_analysis(n = 100; normalize = false, substract_min = false, 
     end
 
     # calculate targets for critic
-    global targets = lambda_truncated_targets(rewards, terminal, next_values, γ)[:]
+    global targets = lambda_truncated_targets(rewards, terminal, next_values, γ; λ = λ_targets, n = n_targets)[:]
     #targets = nstep_targets(rewards, terminal, next_values, γ; n=5)[:]
 
     # calculate targets for critic2
-    global critic2_targets = special_targets_ppo3(rewards, terminal, values, next_values, γ)[:]
+    #global critic2_targets = special_targets_ppo3(rewards, terminal, values, next_values, γ)[:]
     #critic2_targets = special_targets_ppo3(zeros(Float32, size(rewards)), terminal, values, next_values, γ)[:]
-    #critic2_targets = special_targets_ppo3(rewards[:], terminal[:], values[:], circshift(returns, -1), γ)[:]
+    critic2_targets = special_targets_ppo3(rewards[:], terminal[:], values[:], circshift(returns, -1), γ)[:]
 
     # advantages, returns = generalized_advantage_estimation(
     #     rewards,

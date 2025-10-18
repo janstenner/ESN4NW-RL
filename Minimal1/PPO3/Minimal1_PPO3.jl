@@ -34,7 +34,7 @@ include("./../Minimal1_env.jl")
 
 
 seed = Int(floor(rand()*100000))
-# seed = 800
+#seed = 23038
 
 gpu_env = false
 
@@ -54,7 +54,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.0f0 #0.95f0
+p = 0.2f0
 gamma = y
 
 start_steps = -1
@@ -66,8 +66,8 @@ critic_frozen_update_freq = 4
 actor_update_freq = 2
 
 
-learning_rate = 5e-5
-learning_rate_critic = 2e-4
+learning_rate = 2e-5
+learning_rate_critic = 4e-5
 n_epochs = 5
 n_microbatches = 100
 actorbatch_size = 10
@@ -80,7 +80,10 @@ clip1 = false
 start_logσ = -0.3
 tanh_end = true
 clip_range = 0.1f0
-clip_range_vf = nothing #0.2f0
+clip_range_vf = 0.1f0
+
+λ_targets = 0.9f0
+n_targets = 100
 
 betas = (0.9, 0.99)
 noise = nothing #"perlin"
@@ -93,7 +96,7 @@ critic2_takes_action = true
 use_popart = false
 critic_frozen_factor = 0.4f0
 
-reward_shaping = true
+reward_shaping = false
 
 
 wind_only = false
@@ -158,7 +161,10 @@ function initialize_setup(;use_random_init = false)
                 adaptive_weights = adaptive_weights,
                 critic2_takes_action = critic2_takes_action,
                 use_popart = use_popart,
-                critic_frozen_factor = critic_frozen_factor,)
+                critic_frozen_factor = critic_frozen_factor,
+                λ_targets = λ_targets,
+                n_targets = n_targets,
+                )
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -220,7 +226,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
     values = []
     values2 = []
-    states = []
+    global states = []
     mus = []
     terminals = []
 
@@ -367,7 +373,10 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     elseif gae
 
         #deltas = results_run["rewards"] .+ values2 #.* (1 .- terminals) .- values
-        deltas = values2
+
+        offsets = agent.policy.approximator.critic2(vcat(reduce(hcat, states), mus'))[:]
+
+        deltas = values2 #- offsets
 
         global y, p
         advantages, returns = generalized_advantage_estimation(
@@ -378,6 +387,14 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             p;
             terminal=terminals
         )
+        # advantages, returns = generalized_advantage_estimation(
+        #     results_run["rewards"],
+        #     values,
+        #     values2,
+        #     y,
+        #     p;
+        #     terminal=terminals
+        # )
 
         #advantages = next_values #- values
 
@@ -666,3 +683,5 @@ function plot_trajectory()
     display(plott)
 end
 
+include("./same_day_trainer.jl")
+include("./critic_problem.jl")
