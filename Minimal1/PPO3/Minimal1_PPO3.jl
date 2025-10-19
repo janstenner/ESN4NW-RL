@@ -54,7 +54,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.2f0
+p = 0.9f0
 gamma = y
 
 start_steps = -1
@@ -379,22 +379,22 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         deltas = values2 #- offsets
 
         global y, p
-        advantages, returns = generalized_advantage_estimation(
-            deltas,
-            zeros(Float32, size(deltas)),
-            zeros(Float32, size(deltas)),
-            y,
-            p;
-            terminal=terminals
-        )
         # advantages, returns = generalized_advantage_estimation(
-        #     results_run["rewards"],
-        #     values,
-        #     values2,
+        #     deltas,
+        #     zeros(Float32, size(deltas)),
+        #     zeros(Float32, size(deltas)),
         #     y,
         #     p;
         #     terminal=terminals
         # )
+        advantages, returns = generalized_advantage_estimation(
+            results_run["rewards"],
+            values,
+            values2,
+            y,
+            p;
+            terminal=terminals
+        )
 
         #advantages = next_values #- values
 
