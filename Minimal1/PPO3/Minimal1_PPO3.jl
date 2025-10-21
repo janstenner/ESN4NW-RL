@@ -66,11 +66,11 @@ critic_frozen_update_freq = 4
 actor_update_freq = 2
 
 
-learning_rate = 2e-5
+learning_rate = 4e-6
 learning_rate_critic = 4e-5
 n_epochs = 5
 n_microbatches = 100
-actorbatch_size = 10
+actorbatch_size = 1000000
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0.0f0 #0.0001
@@ -79,7 +79,7 @@ target_kl = Inf
 clip1 = false
 start_logσ = -0.3
 tanh_end = true
-clip_range = 0.1f0
+clip_range = 0.05f0
 clip_range_vf = 0.1f0
 
 λ_targets = 0.9f0
@@ -95,6 +95,9 @@ adaptive_weights = true
 critic2_takes_action = true
 use_popart = false
 critic_frozen_factor = 0.4f0
+use_exploration_module = false
+use_whole_delta_targets = true
+use_critic3 = true
 
 reward_shaping = false
 
@@ -164,6 +167,9 @@ function initialize_setup(;use_random_init = false)
                 critic_frozen_factor = critic_frozen_factor,
                 λ_targets = λ_targets,
                 n_targets = n_targets,
+                use_critic3 = use_critic3,
+                use_exploration_module = use_exploration_module,
+                use_whole_delta_targets = use_whole_delta_targets,
                 )
 
 
@@ -224,11 +230,12 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         results_run["σ$k"] = []
     end
 
-    values = []
-    values2 = []
+    global values = []
+    global values2 = []
+    global values3 = []
     global states = []
-    mus = []
-    terminals = []
+    global mus = []
+    global terminals = []
 
     if new_day
         reset!(env)
@@ -284,6 +291,11 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         critic2_input = critic2_takes_action ? vcat(env.state, action) : env.state
         value2 = agent.policy.approximator.critic2(critic2_input)[1]
         push!(values2, value2)
+
+        if use_critic3
+            value3 = agent.policy.approximator.critic3(env.state)[1]
+            push!(values3, value3)
+        end
 
         
         push!(states, env.state)
@@ -379,22 +391,35 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         deltas = values2 #- offsets
 
         global y, p
-        # advantages, returns = generalized_advantage_estimation(
-        #     deltas,
-        #     zeros(Float32, size(deltas)),
-        #     zeros(Float32, size(deltas)),
-        #     y,
-        #     p;
-        #     terminal=terminals
-        # )
-        advantages, returns = generalized_advantage_estimation(
-            results_run["rewards"],
-            values,
-            values2,
-            y,
-            p;
-            terminal=terminals
-        )
+        global advantages
+
+        
+        
+        if use_whole_delta_targets
+                if use_critic3
+                    deltas = values2 - values3
+                else
+                    deltas = values2
+                end
+            advantages, returns = generalized_advantage_estimation(
+                deltas,
+                zeros(Float32, size(deltas)),
+                zeros(Float32, size(deltas)),
+                y,
+                p;
+                terminal=terminals
+            )
+        else
+            advantages, returns = generalized_advantage_estimation(
+                results_run["rewards"],
+                values,
+                values2,
+                y,
+                p;
+                terminal=terminals
+            )
+        end
+        
 
         #advantages = next_values #- values
 
@@ -418,7 +443,11 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             line=attr(color = "rgba(200, 200, 200, 0.3)")))
         
         push!(to_plot, scatter(x=xx, y=values, name="Values", yaxis = "y2"))
-        push!(to_plot, scatter(x=xx, y=values2, name="Next Values", yaxis = "y2"))
+        if use_critic3
+            push!(to_plot, scatter(x=xx, y=values2-values3, name="Values2-Values3", yaxis = "y2"))
+        else
+            push!(to_plot, scatter(x=xx, y=values2, name="Values2", yaxis = "y2"))
+        end
         push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
     else
         push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))

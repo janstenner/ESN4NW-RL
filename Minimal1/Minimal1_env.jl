@@ -34,6 +34,7 @@ min_best_episode = 1
 
 # default - will be overwritten in most training scripts
 reward_shaping = true
+reward_shaping_beta = 1.0f0
 
 
 
@@ -305,7 +306,7 @@ function calculate_day(action, env, step = nothing; reward_shaping = reward_shap
 
     if reward_shaping
         # potential based reward shaping
-        beta = 0.5
+        beta = reward_shaping_beta
         reward += beta * (compute_left_before - compute_left_after - (gamma-1) * compute_left_after)
 
         reward *= reward_scale_factor
@@ -371,7 +372,7 @@ function generate_random_init()
 end
 
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 3, optimal_trainings  = 0, outer_loops = 500, only_wind_steps = 0, json = false, reward_shaping = reward_shaping, plot_runs = true)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimal_trainings  = 0, outer_loops = 500, only_wind_steps = 0, json = false, reward_shaping = reward_shaping, plot_runs = true)
     global wind_only, optimal_trajectory
     wind_only = false
     
