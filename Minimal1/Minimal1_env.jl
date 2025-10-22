@@ -544,6 +544,8 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             if !isempty(validation_scores)
                 println(lineplot(validation_scores, title="Validation scores", xlabel="Episode", ylabel="Score", color=:cyan))
+
+                println("Best validation score: $(maximum(validation_scores))")
             end
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
