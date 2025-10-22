@@ -43,7 +43,7 @@ gpu_env = false
 # agent tuning parameters
 memory_size = 0
 nna_scale = 6.4
-nna_scale_critic = 3.2
+nna_scale_critic = 4.2
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -54,7 +54,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.9f0
+p = 0.0f0
 gamma = y
 
 start_steps = -1
@@ -66,8 +66,8 @@ critic_frozen_update_freq = 4
 actor_update_freq = 2
 
 
-learning_rate = 4e-6
-learning_rate_critic = 4e-5
+learning_rate = 2e-4
+learning_rate_critic = 4e-4
 n_epochs = 5
 n_microbatches = 100
 actorbatch_size = 1000000
@@ -79,8 +79,8 @@ target_kl = Inf
 clip1 = false
 start_logσ = -0.3
 tanh_end = true
-clip_range = 0.05f0
-clip_range_vf = 0.1f0
+clip_range = 0.1f0
+clip_range_vf = 0.2f0
 
 λ_targets = 0.9f0
 n_targets = 100
@@ -94,10 +94,10 @@ new_loss = false#true
 adaptive_weights = true
 critic2_takes_action = true
 use_popart = false
-critic_frozen_factor = 0.4f0
+critic_frozen_factor = 0.3f0
 use_exploration_module = false
 use_whole_delta_targets = true
-use_critic3 = true
+use_critic3 = false
 
 reward_shaping = false
 
@@ -399,7 +399,9 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
                 if use_critic3
                     deltas = values2 - values3
                 else
-                    deltas = values2
+                    mean_c2 = RL.antithetic_mean(agent.policy.approximator.actor, agent.policy.approximator.critic2, reduce(hcat, states))[:]
+
+                    deltas = values2 - mean_c2
                 end
             advantages, returns = generalized_advantage_estimation(
                 deltas,
@@ -442,14 +444,19 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             ),
             line=attr(color = "rgba(200, 200, 200, 0.3)")))
         
-        push!(to_plot, scatter(x=xx, y=values, name="Values", yaxis = "y2"))
+        
         if use_critic3
             push!(to_plot, scatter(x=xx, y=values2-values3, name="Values2-Values3", yaxis = "y2"))
-        else
             push!(to_plot, scatter(x=xx, y=values2, name="Values2", yaxis = "y2"))
+            push!(to_plot, scatter(x=xx, y=values3, name="Values3", yaxis = "y2"))
+        else
+            push!(to_plot, scatter(x=xx, y=values2-mean_c2, name="Values2-mean_c2", yaxis = "y2"))
+            push!(to_plot, scatter(x=xx, y=values2, name="Values2", yaxis = "y2"))
+            push!(to_plot, scatter(x=xx, y=mean_c2, name="mean_c2", yaxis = "y2"))
         end
-        push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
+        #push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
     else
+        push!(to_plot, scatter(x=xx, y=values, name="Values", yaxis = "y2"))
         push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
     end
 

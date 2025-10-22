@@ -219,7 +219,7 @@ function clean_reconstructed_policies!()
 end
 
 
-function plot_validation_comparison()
+function plot_validation_comparison(; current = false)
     # Include validation script
     include("Minimal1/Validation_Minimal1.jl")
     
@@ -321,6 +321,25 @@ function plot_validation_comparison()
             end
         end
     end
+
+    global agent_save
+    if current && !isnothing(agent_save)
+        global agent, validation_scores
+        agent_temp = deepcopy(agent)
+        agent = deepcopy(agent_save)
+
+        current_scores = validate_agent()
+
+        best_validation_results["Current"] = (
+                        current_scores,
+                        validation_scores
+                    )
+        
+        agent = deepcopy(agent_temp)
+        
+    elseif isnothing(agent_save)
+        println("Current failed: agent_save is nothing!")
+    end
     
     # First, calculate the order based on mean scores
     order = sort(collect(keys(best_validation_results)), 
@@ -333,6 +352,7 @@ function plot_validation_comparison()
     # Define colors for special cases
     color_map["Optimal"] = [76, 175, 80]  # Muted forest green
     color_map["Untrained"] = [239, 83, 80]  # Reddish color
+    color_map["Current"] = [239, 83, 239]  # Purple
     
     # Define algorithm colors
     for key in order

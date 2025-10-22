@@ -402,7 +402,9 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
     
     global logs = []
     global validation_scores
-    global agent_save = nothing
+    global agent_save
+
+    
 
     for j = 1:outer_loops
 

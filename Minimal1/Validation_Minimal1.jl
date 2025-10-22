@@ -8,12 +8,28 @@ global validation_results = FileIO.load("./Minimal1/validation_results.jld2","va
 #FileIO.save("./Minimal1/validation_results.jld2","validation_results",validation_results)
 
 
-function plot_validation_results()
+function plot_validation_results(; current = false)
     traces = AbstractTrace[]
 
     for (key, value) in validation_results
         trace = box(y=value, name=key, boxpoints="all", quartilemethod="linear")
         push!(traces, trace)
+    end
+
+    global agent_save
+    if current && !isnothing(agent_save)
+        global agent
+        agent_temp = deepcopy(agent)
+        agent = deepcopy(agent_save)
+
+        current_scores = validate_agent()
+
+        trace = box(y=current_scores, name="Current Agent", boxpoints="all", quartilemethod="linear")
+        push!(traces, trace)
+        agent = deepcopy(agent_temp)
+        
+    elseif isnothing(agent_save)
+        println("Current failed: agent_save is nothing!")
     end
 
     p = plot(traces)
