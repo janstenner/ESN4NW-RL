@@ -54,7 +54,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.0f0
+p = 0.99f0
 gamma = y
 
 start_steps = -1
@@ -70,10 +70,10 @@ learning_rate = 2e-4
 learning_rate_critic = 4e-4
 n_epochs = 5
 n_microbatches = 100
-actorbatch_size = 1000000
+actorbatch_size = 10
 logσ_is_network = true
 max_σ = 1.0f0
-entropy_loss_weight = 0.3f0
+entropy_loss_weight = 0.02f0
 clip_grad = 0.5
 target_kl = 0.01
 clip1 = false
