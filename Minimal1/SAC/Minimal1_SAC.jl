@@ -58,13 +58,14 @@ gamma = y
 a = 3f-4 #0.2f0
 t = 0.005f0
 target_entropy = -1.0
+use_popart = false
 
 
 learning_rate = 3e-4
 trajectory_length = 1_000_000
 batch_size = 256
 update_after = 200_000
-update_freq = 10
+update_freq = 50
 update_loops = 3
 clip_grad = 0.5
 start_logσ = -1.5
@@ -119,7 +120,8 @@ function initialize_setup(;use_random_init = false)
                 start_logσ = start_logσ,
                 tanh_end = tanh_end,
                 automatic_entropy_tuning = automatic_entropy_tuning,
-                target_entropy = target_entropy,)
+                target_entropy = target_entropy,
+                use_popart = use_popart,)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -142,7 +144,7 @@ optimal_trajectory = trajectories["SAC_DDPG"]["with_RS"]
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, plot_values = false, plot_critic2 = false, critic2_diagnostics = false, json = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, plot_values = true, plot_critic2 = false, critic2_diagnostics = false, json = false)
     global history_steps
 
     if show_training_episode
@@ -290,8 +292,10 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     end
 
     if plot_values
-        push!(to_plot, scatter(x=xx, y=q1, name="q1", yaxis = "y2"))
-        push!(to_plot, scatter(x=xx, y=q2, name="q2", yaxis = "y2"))
+        # push!(to_plot, scatter(x=xx, y=q1, name="q1", yaxis = "y2"))
+        # push!(to_plot, scatter(x=xx, y=q2, name="q2", yaxis = "y2"))
+
+        push!(to_plot, scatter(x=xx, y=q1-q2, name="q1-q2", yaxis = "y2"))
     end
 
     push!(to_plot, scatter(x=xx, y=results_run["loadleft"], name="Load Left"))

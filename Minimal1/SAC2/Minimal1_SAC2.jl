@@ -18,15 +18,14 @@ using JSON
 using UnicodePlots
 
 
-scriptname = "Minimal1"
+scriptname = "Minimal1_SAC2"
 
 
 #dir variable
 dirpath = string(@__DIR__)
 open(dirpath * "/.gitignore", "w") do io
     println(io, "training_frames/*")
-    #println(io, "saves/*")
-    println(io, "training.mp4")
+    println(io, "saves/*")
 end
 
 
@@ -34,19 +33,20 @@ include("./../Minimal1_env.jl")
 
 
 seed = Int(floor(rand()*100000))
-#seed = 23038
+# seed = 800
 
 gpu_env = false
 
 
 
 # agent tuning parameters
-memory_size = 0
 nna_scale = 6.4
-nna_scale_critic = 4.2
+nna_scale_critic = 3.2
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
+logσ_is_network = true
+tanh_end = false
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
 
@@ -54,53 +54,24 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.0f0
 gamma = y
-
-start_steps = -1
-start_policy = ZeroPolicy(actionspace)
-
-update_freq = 6000
-
-critic_frozen_update_freq = 4
-actor_update_freq = 2
-
-
-learning_rate = 6e-5
-learning_rate_critic = 2e-4
-n_epochs = 5
-n_microbatches = 100
-actorbatch_size = 10
-logσ_is_network = true
-max_σ = 1.0f0
-entropy_loss_weight = 0.02f0
-clip_grad = 0.5
-target_kl = 0.01
-clip1 = false
-start_logσ = -0.3
-tanh_end = true
-clip_range = 0.05f0
-clip_range_vf = 0.1f0
-
-λ_targets = 0.9f0
-n_targets = 100
-
-betas = (0.9, 0.99)
-noise = nothing #"perlin"
-noise_scale = 20
-normalize_advantage = true
-fear_scale = 0.4
-new_loss = false#true
-adaptive_weights = true
-critic2_takes_action = true
+a = 3f-4 #0.2f0
+t = 0.005f0
+target_entropy = -1.0
 use_popart = false
-critic_frozen_factor = 0.3f0
-use_exploration_module = false
-use_whole_delta_targets = true
-use_critic3 = false
+
+
+learning_rate = 3e-4
+trajectory_length = 1_000_000
+batch_size = 256
+update_after = 200_000
+update_freq = 50
+update_loops = 3
+clip_grad = 0.5
+start_logσ = -1.5
+automatic_entropy_tuning = true
 
 reward_shaping = false
-
 
 wind_only = false
 
@@ -125,52 +96,32 @@ function initialize_setup(;use_random_init = false)
         
         
 
-        global agent = create_agent_ppo3(
-                # approximator = approximator,
+        global agent = create_agent_sac2(
                 action_space = actionspace,
                 state_space = env.state_space,
-                use_gpu = use_gpu, 
                 rng = rng,
-                y = y, p = p,
+                y = y,
+                a = a,
+                t = t,
+                use_gpu = use_gpu,
+                update_after = update_after,
                 update_freq = update_freq,
-                critic_frozen_update_freq = critic_frozen_update_freq,
-                actor_update_freq = actor_update_freq,
+                update_loops = update_loops,
+                trajectory_length = trajectory_length,
+                batch_size = batch_size,
                 learning_rate = learning_rate,
-                learning_rate_critic = learning_rate_critic,
                 nna_scale = nna_scale,
                 nna_scale_critic = nna_scale_critic,
                 drop_middle_layer = drop_middle_layer,
                 drop_middle_layer_critic = drop_middle_layer_critic,
                 fun = fun,
-                clip1 = clip1,
-                n_epochs = n_epochs,
-                n_microbatches = n_microbatches,
-                actorbatch_size = actorbatch_size,
                 logσ_is_network = logσ_is_network,
-                max_σ = max_σ,
-                entropy_loss_weight = entropy_loss_weight,
                 clip_grad = clip_grad,
-                target_kl = target_kl,
                 start_logσ = start_logσ,
                 tanh_end = tanh_end,
-                clip_range = clip_range,
-                clip_range_vf = clip_range_vf,
-                betas = betas,
-                noise = noise,
-                noise_scale = noise_scale,
-                normalize_advantage = normalize_advantage,
-                fear_scale = fear_scale,
-                new_loss = new_loss,
-                adaptive_weights = adaptive_weights,
-                critic2_takes_action = critic2_takes_action,
-                use_popart = use_popart,
-                critic_frozen_factor = critic_frozen_factor,
-                λ_targets = λ_targets,
-                n_targets = n_targets,
-                use_critic3 = use_critic3,
-                use_exploration_module = use_exploration_module,
-                use_whole_delta_targets = use_whole_delta_targets,
-                )
+                automatic_entropy_tuning = automatic_entropy_tuning,
+                target_entropy = target_entropy,
+                use_popart = use_popart,)
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -187,13 +138,13 @@ initialize_setup()
 
 trajectories_file = "optimal_trajectories.jld2"
 trajectories = FileIO.load(trajectories_file, "trajectories")
-optimal_trajectory = trajectories["PPO2"]["with_RS"]
+optimal_trajectory = trajectories["SAC_DDPG"]["with_RS"]
 
 
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, gae = true, plot_values = true, plot_critic2 = false, critic2_diagnostics = false, new_day = true,)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, plot_values = true, plot_critic2 = false, critic2_diagnostics = false, json = false)
     global history_steps
 
     if show_training_episode
@@ -230,102 +181,56 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         results_run["σ$k"] = []
     end
 
-    global values = []
-    global values2 = []
-    global values3 = []
-    global states = []
-    global mus = []
-    global terminals = []
+    q1 = []
+    q2 = []
+    states = []
+    terminals = []
 
-    if new_day
-        reset!(env)
-        generate_random_init()
-    else
-        reset!(env)
+    reset!(env)
+    generate_random_init()
 
-        y0 = create_state(; generate_day = false)
-
-        env.y0 = deepcopy(y0)
-        env.y = deepcopy(y0)
-        env.state = env.featurize(; env = env)
-
-        global day_trajectory = CircularArrayTrajectory(;
-                capacity = 288,
-                state = Float32 => (size(env.state_space)[1], 1),
-                action = Float32 => (size(env.action_space)[1], 1),
-                action_log_prob = Float32 => (1),
-                reward = Float32 => (1),
-                explore_mod = Float32 => (1),
-                terminal = Bool => (1,),
-                next_state = Float32 => (size(env.state_space)[1], 1),
-        )
-    end
+    global run_logs = []
 
     while !env.done
 
         if exploration
             action = agent(env)
-            μ = agent.policy.last_mu[1]
-            σ = agent.policy.last_sigma
         else
-            prob_temp = prob(agent.policy, env)
-            action = prob_temp.μ
-            μ = prob_temp.μ[1]
-            σ = prob_temp.σ
-
-            if ndims(action) == 2
-                log_p = vec(sum(normlogpdf(μ, σ, action), dims=1))
-            else
-                log_p = normlogpdf(μ, σ, action)
-            end
-
-            agent.policy.last_action_log_prob = log_p
+            action = agent.policy.actor.μ(env.state)
         end
         
 
         #action = agent(env)
+        step_dict = Dict()
 
-        value = agent.policy.approximator.critic(env.state)[1]
-        push!(values, value)
+        push!(q1, agent.policy.qnetwork1(vcat(env.state, action))[1])
+        push!(q2, agent.policy.qnetwork2(vcat(env.state, action))[1])
 
-        critic2_input = critic2_takes_action ? vcat(env.state, action) : env.state
-        value2 = agent.policy.approximator.critic2(critic2_input)[1]
-        push!(values2, value2)
-
-        if use_critic3
-            value3 = agent.policy.approximator.critic3(env.state)[1]
-            push!(values3, value3)
+        if json
+            step_dict["step"] = env.steps
+            step_dict["state"] = env.state
+            step_dict["action"] = action
+            step_dict["q1"] = q1[end]
+            step_dict["q2"] = q2[end]
         end
 
-        
-        push!(states, env.state)
-        push!(mus, μ)
-
-        temp_state = deepcopy(env.state)
-        env(action; reward_shaping = reward_shaping)
+        env(action)
 
         push!(terminals, env.done)
 
+        if json
+            step_dict["next_state"] = env.state
+            step_dict["terminated"] = env.done
+            step_dict["reward"] = env.reward[1]
+            push!(run_logs, step_dict)
+        end
 
         for k in 1:n_windCORES
             push!(results_run["hpc$k"], clamp((action[1]+1)*0.5, 0, 1)) #env.p[k])
-            push!(results_run["σ$k"], σ[k])
+            #push!(results_run["σ$k"], σ[k])
         end
         push!(results_run["rewards"], env.reward[1])
         push!(results_run["loadleft"], env.y[1])
-
-
-        if !new_day
-            push!(day_trajectory;
-                state = temp_state,
-                action = action,
-                action_log_prob = agent.policy.last_action_log_prob,
-                reward = env.reward[:],
-                explore_mod = 1.0f0,
-                terminal = env.done,
-                next_state = env.state,
-            )
-        end
 
         # println(mean(env.reward))
 
@@ -382,87 +287,15 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         for k in 1:n_windCORES
             push!(to_plot, scatter(x=xx, y=results_run["σ$k"], name="σ$k", yaxis = "y2"))
         end
-    elseif gae
-
-        #deltas = results_run["rewards"] .+ values2 #.* (1 .- terminals) .- values
-
-        offsets = agent.policy.approximator.critic2(vcat(reduce(hcat, states), mus'))[:]
-
-        deltas = values2 #- offsets
-
-        global y, p
-        global advantages
-
-        
-        
-        if use_whole_delta_targets
-                if use_critic3
-                    deltas = values2 - values3
-                else
-                    mean_c2 = RL.antithetic_mean(agent.policy.approximator.actor, agent.policy.approximator.critic2, reduce(hcat, states))[:]
-
-                    deltas = values2 - mean_c2
-                end
-            advantages, returns = generalized_advantage_estimation(
-                deltas,
-                zeros(Float32, size(deltas)),
-                zeros(Float32, size(deltas)),
-                y,
-                p;
-                terminal=terminals
-            )
-        else
-            advantages, returns = generalized_advantage_estimation(
-                results_run["rewards"],
-                values,
-                values2,
-                y,
-                p;
-                terminal=terminals
-            )
-        end
-        
-
-        #advantages = next_values #- values
-
-        if normalize_advantage
-            advantages = (advantages .- mean(advantages)) ./ clamp(std(advantages), 1e-8, 1000.0)
-        end
-
-
-        
-
-        push!(to_plot, scatter(x=xx, y=results_run["hpc1"], name="Advantage",
-            mode="markers",
-            marker=attr(
-                color=advantages,               # array of numbers
-                cmin = -1.0,
-                cmid = 0.0,
-                cmax = 1.0,
-                colorscale=colorscale,
-                showscale=false
-            ),
-            line=attr(color = "rgba(200, 200, 200, 0.3)")))
-        
-        
-        if use_critic3
-            push!(to_plot, scatter(x=xx, y=values2-values3, name="Values2-Values3", yaxis = "y2"))
-            push!(to_plot, scatter(x=xx, y=values2, name="Values2", yaxis = "y2"))
-            push!(to_plot, scatter(x=xx, y=values3, name="Values3", yaxis = "y2"))
-        else
-            push!(to_plot, scatter(x=xx, y=values2-mean_c2, name="Values2-mean_c2", yaxis = "y2"))
-            push!(to_plot, scatter(x=xx, y=values2, name="Values2", yaxis = "y2"))
-            push!(to_plot, scatter(x=xx, y=mean_c2, name="mean_c2", yaxis = "y2"))
-        end
-        #push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
     else
-        push!(to_plot, scatter(x=xx, y=values, name="Values", yaxis = "y2"))
         push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
     end
 
     if plot_values
-        #push!(to_plot, scatter(x=xx, y=offset_values, name="Critic Value", yaxis = "y2"))
-        #push!(to_plot, scatter(x=xx, y=returns, name="Return", yaxis = "y2"))
+        # push!(to_plot, scatter(x=xx, y=q1, name="q1", yaxis = "y2"))
+        # push!(to_plot, scatter(x=xx, y=q2, name="q2", yaxis = "y2"))
+
+        push!(to_plot, scatter(x=xx, y=q1-q2, name="q1-q2", yaxis = "y2"))
     end
 
     push!(to_plot, scatter(x=xx, y=results_run["loadleft"], name="Load Left"))
@@ -470,8 +303,8 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
 
     for k in 1:n_windCORES
-        push!(to_plot, scatter(x=xx, y=results_run["hpc$k"], name="WindCORE utilization $k",
-        line=attr(color = "rgba(200, 200, 200, 0.3)")))
+        push!(to_plot, scatter(x=xx, y=results_run["hpc$k"], name="WindCORE utilization $k"))
+        #line=attr(color = "rgba(200, 200, 200, 0.3)")))
     end
 
 
@@ -555,16 +388,16 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         for (i,state) in enumerate(states)
             inputs = vcat(repeat(state, 1, length(actions)), actions')
 
-            #mu = agent.policy.approximator.actor.μ(state)[:]
-            #mu_value = agent.policy.approximator.critic2(vcat(state, mu))
-            #mu_values = mu_value .* ones(length(actions))
+            mu = agent.policy.approximator.actor.μ(state)[:]
+            mu_value = agent.policy.approximator.critic2(vcat(state, mu))
+            mu_values = mu_value .* ones(length(actions))
 
             critic2_values = agent.policy.approximator.critic2(inputs)[:] #-1 first
 
-            results_critic2[:,i] = critic2_values #- mu_values
+            results_critic2[:,i] = critic2_values - mu_values
         end
 
-        #results_critic2 = (results_critic2 .- mean(results_critic2)) ./ clamp(std(results_critic2), 1e-8, 1000.0)
+        results_critic2 = (results_critic2 .- mean(results_critic2)) ./ clamp(std(results_critic2), 1e-8, 1000.0)
 
         min_val = - maximum(abs.(results_critic2))
 
@@ -577,19 +410,15 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
                 results_critic2[idx2,i] = -min_val
             else
                 idx = clamp(searchsortedfirst(actions, mus[i]), 1, length(actions))
-
-                idx2 = findmax(results_critic2[:,i])[2]
-                results_critic2[idx2,i] = -min_val
             end
 
             results_critic2[idx,i] = min_val
         end
 
-        display(plot(PlotlyJS.heatmap(x = xx, y = actions, z=results_critic2, coloraxis="coloraxis"), layout))
+        display(plot(heatmap(x = xx, y = actions, z=results_critic2, coloraxis="coloraxis"), layout))
 
     end
 end
-
 
 
 
@@ -718,6 +547,3 @@ function plot_trajectory()
 
     display(plott)
 end
-
-include("./same_day_trainer.jl")
-include("./critic_problem.jl")
