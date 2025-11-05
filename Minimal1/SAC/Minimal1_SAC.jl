@@ -214,7 +214,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             step_dict["q2"] = q2[end]
         end
 
-        env(action)
+        env(action; reward_shaping = reward_shaping)
 
         push!(terminals, env.done)
 
@@ -295,7 +295,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         # push!(to_plot, scatter(x=xx, y=q1, name="q1", yaxis = "y2"))
         # push!(to_plot, scatter(x=xx, y=q2, name="q2", yaxis = "y2"))
 
-        push!(to_plot, scatter(x=xx, y=q1-q2, name="q1-q2", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=min.(q1, q2), name="min.(q1, q2)", yaxis = "y2"))
     end
 
     push!(to_plot, scatter(x=xx, y=results_run["loadleft"], name="Load Left"))

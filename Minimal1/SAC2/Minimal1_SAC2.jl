@@ -45,7 +45,7 @@ nna_scale_critic = 3.2
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
-logσ_is_network = true
+logσ_is_network = false
 tanh_end = false
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
@@ -57,16 +57,16 @@ y = 0.99f0
 gamma = y
 a = 3f-4 #0.2f0
 t = 0.005f0
-target_entropy = -1.0
+target_entropy = -0.8f0
 use_popart = false
 
 
-learning_rate = 3e-4
+learning_rate = 1e-4
 trajectory_length = 1_000_000
 batch_size = 256
-update_after = 200_000
+update_after = 100_000
 update_freq = 50
-update_loops = 3
+update_loops = 1
 clip_grad = 0.5
 start_logσ = -1.5
 automatic_entropy_tuning = true
@@ -214,7 +214,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             step_dict["q2"] = q2[end]
         end
 
-        env(action)
+        env(action; reward_shaping = reward_shaping)
 
         push!(terminals, env.done)
 
@@ -295,7 +295,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         # push!(to_plot, scatter(x=xx, y=q1, name="q1", yaxis = "y2"))
         # push!(to_plot, scatter(x=xx, y=q2, name="q2", yaxis = "y2"))
 
-        push!(to_plot, scatter(x=xx, y=q1-q2, name="q1-q2", yaxis = "y2"))
+        push!(to_plot, scatter(x=xx, y=min.(q1, q2), name="min.(q1, q2)", yaxis = "y2"))
     end
 
     push!(to_plot, scatter(x=xx, y=results_run["loadleft"], name="Load Left"))
