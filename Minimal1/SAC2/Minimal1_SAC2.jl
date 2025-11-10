@@ -26,6 +26,7 @@ dirpath = string(@__DIR__)
 open(dirpath * "/.gitignore", "w") do io
     println(io, "training_frames/*")
     println(io, "saves/*")
+    println(io, "training.mp4")
 end
 
 
@@ -61,7 +62,8 @@ target_entropy = -0.8f0
 use_popart = false
 
 
-learning_rate = 1e-4
+learning_rate = 0#1e-4
+learning_rate_critic = 1e-4
 trajectory_length = 1_000_000
 batch_size = 256
 update_after = 100_000
@@ -70,6 +72,9 @@ update_loops = 1
 clip_grad = 0.5
 start_logσ = -1.5
 automatic_entropy_tuning = true
+on_policy_critic_update_freq = 2500
+λ_targets = 1.0f0
+lr_alpha = 1e-2
 
 reward_shaping = false
 
@@ -110,6 +115,7 @@ function initialize_setup(;use_random_init = false)
                 trajectory_length = trajectory_length,
                 batch_size = batch_size,
                 learning_rate = learning_rate,
+                learning_rate_critic = learning_rate_critic,
                 nna_scale = nna_scale,
                 nna_scale_critic = nna_scale_critic,
                 drop_middle_layer = drop_middle_layer,
@@ -121,7 +127,11 @@ function initialize_setup(;use_random_init = false)
                 tanh_end = tanh_end,
                 automatic_entropy_tuning = automatic_entropy_tuning,
                 target_entropy = target_entropy,
-                use_popart = use_popart,)
+                use_popart = use_popart,
+                on_policy_critic_update_freq = on_policy_critic_update_freq,
+                λ_targets = λ_targets,
+                lr_alpha = lr_alpha,
+                )
 
 
     global hook = GeneralHook(min_best_episode = min_best_episode,
@@ -144,7 +154,7 @@ optimal_trajectory = trajectories["SAC_DDPG"]["with_RS"]
 
 
 
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, plot_values = true, plot_critic2 = false, critic2_diagnostics = false, json = false)
+function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, plot_values = true, plot_critic2 = false, critic2_diagnostics = false, json = false, new_day = true,)
     global history_steps
 
     if show_training_episode
@@ -186,8 +196,26 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     states = []
     terminals = []
 
-    reset!(env)
-    generate_random_init()
+    if new_day
+        reset!(env)
+        generate_random_init()
+    else
+        reset!(env)
+
+        y0 = create_state(; generate_day = false)
+
+        env.y0 = deepcopy(y0)
+        env.y = deepcopy(y0)
+        env.state = env.featurize(; env = env)
+
+        global day_trajectory = CircularArrayTrajectory(;
+                capacity = 288,
+                state = Float32 => (size(env.state_space)[1], 1),
+                action = Float32 => (size(env.action_space)[1], 1),
+                reward = Float32 => (1),
+                terminal = Bool => (1,),
+        )
+    end
 
     global run_logs = []
 
@@ -214,6 +242,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
             step_dict["q2"] = q2[end]
         end
 
+        temp_state = deepcopy(env.state)
         env(action; reward_shaping = reward_shaping)
 
         push!(terminals, env.done)
@@ -231,6 +260,16 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         end
         push!(results_run["rewards"], env.reward[1])
         push!(results_run["loadleft"], env.y[1])
+
+
+        if !new_day
+            push!(day_trajectory;
+                state = temp_state,
+                action = action,
+                reward = env.reward[:],
+                terminal = env.done,
+            )
+        end
 
         # println(mean(env.reward))
 
