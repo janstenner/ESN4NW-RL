@@ -3,12 +3,14 @@ using JSON, CodecZlib
 
 
 
-function train_same_day(n = 100, days_per_trajectory = 10; minibatch_size = 60, update_actor = true, update_critic = true, show_plots = false, time_step_interval = [0,1], inline_trajectory_analysis = false)
+function train_same_day(n = 100, days_per_trajectory = 10; show_plots = false, inline_trajectory_analysis = false)
 
     agent.policy.update_step = 0
 
 
     for i in 1:n
+
+        @show i
 
         global multiple_day_trajectory = CircularArrayTrajectory(;
                 capacity = 288 * days_per_trajectory,
@@ -30,14 +32,26 @@ function train_same_day(n = 100, days_per_trajectory = 10; minibatch_size = 60, 
         end
 
 
+        # if inline_trajectory_analysis
+        #     #fig = trajectory_analysis(0; normalize=true, full_y_axis=true)
+        #     #display(fig)
+        #     fig = trajectory_analysis(0; normalize=false, full_y_axis=true)
+        #     display(fig)
+        # end
+
+
+
         RL.on_policy_critic_update(agent.policy, multiple_day_trajectory; whole_trajectory = true)
 
+
         if inline_trajectory_analysis
-            fig = trajectory_analysis(0; normalize=true, full_y_axis=true)
-            display(fig)
+            #fig = trajectory_analysis(0; normalize=true, full_y_axis=true)
+            #display(fig)
             fig = trajectory_analysis(0; normalize=false, full_y_axis=true)
             display(fig)
         end
+
+        
     end
 
     println("Training complete")
@@ -74,8 +88,12 @@ function trajectory_analysis(n = 100; normalize = false, substract_min = false, 
         end
     end
 
+    whole_trajectory = true
+
 
     xx = collect(dt/60:dt/60:te/60)
+
+    p = agent.policy
 
     γ, τ, α = p.γ, p.τ, p.α
 
@@ -86,43 +104,21 @@ function trajectory_analysis(n = 100; normalize = false, substract_min = false, 
     next_states = deepcopy(circshift(s, (0,0,-1)))
     next_states[:,:, end] = zeros(Float32, size(s, 1), size(s, 2))  # terminal state
 
-    μ, logσ = p.actor(p.device_rng, next_states)
-
-    acc_mu  = zeros(Float32, size(μ)) 
-    acc_logp = zeros(Float32, size(μ)) 
-
-    for k in 1:K
-        aa, logp_π = p.actor(p.device_rng, next_states; is_sampling=true, is_return_log_prob=true)
-
-        acc_logp .+= logp_π
-
-        a_plus  = aa
-        a_minus = μ .- (aa .- μ)
-
-        y_plus1  = send_to_host(p.target_qnetwork1(vcat(next_states, a_plus)))
-        y_minus1 = send_to_host(p.target_qnetwork1(vcat(next_states, a_minus)))
-
-        y_plus2  = send_to_host(p.target_qnetwork2(vcat(next_states, a_plus)))
-        y_minus2 = send_to_host(p.target_qnetwork2(vcat(next_states, a_minus)))
-
-
-        acc_mu .+= min.(y_plus1, y_plus2) .- α .* logp_π
-        acc_mu .+= min.(y_minus1, y_minus2) .- α .* logp_π
-    end
-
-
-    acc_mu ./= 2*K
-    acc_logp ./= K
+    acc_mu, acc_logp = RL.antithetic_mean_sac2(p, next_states, α)
     
     logp_π′ = acc_logp
 
-
     next_values = acc_mu
+
+    if whole_trajectory
+        next_values[:,:, end] .*= 0.0f0     # terminal states
+    end
 
     n_envs = size(t, 1)
     next_values = reshape( next_values, n_envs, :)
     
     targets = td_lambda_targets(r, t, next_values, γ; λ = p.λ_targets)
+
 
     # calculate real returns for each state
     terminal = t
@@ -392,8 +388,6 @@ function create_training_movie(n_frames = 300, training_dict = nothing; full_y_a
 
     for frame in 1:n_frames
 
-
-        train_same_day(1,1;)
         fig = trajectory_analysis(30; normalize = normalize, full_y_axis = full_y_axis)
 
         if !isnothing(training_dict)
@@ -404,6 +398,10 @@ function create_training_movie(n_frames = 300, training_dict = nothing; full_y_a
         end
 
         PlotlyJS.savefig(fig, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1800, height=1600)
+
+        if frame != n_frames
+            train_same_day(1,1;)
+        end
     end
 
     rm(dirpath * "/training.mp4", force=true)

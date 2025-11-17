@@ -54,16 +54,16 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.99f0
+y = 1.0f0
 gamma = y
-a = 3f-4 #0.2f0
-t = 0.005f0
+a = 3f-2 #0.2f0
+t = 0.02f0
 target_entropy = -0.8f0
 use_popart = false
 
 
-learning_rate = 0#1e-4
-learning_rate_critic = 1e-4
+learning_rate = 3e-4
+learning_rate_critic = 3e-4
 trajectory_length = 1_000_000
 batch_size = 256
 update_after = 100_000
@@ -73,12 +73,15 @@ clip_grad = 0.5
 start_logσ = -1.5
 automatic_entropy_tuning = true
 on_policy_critic_update_freq = 2500
-λ_targets = 1.0f0
+λ_targets = 0.9f0
 lr_alpha = 1e-2
+fear_factor = 1.0f0
 
 reward_shaping = false
 
 wind_only = false
+
+betas = (0.9, 0.9)
 
 
 
@@ -131,6 +134,9 @@ function initialize_setup(;use_random_init = false)
                 on_policy_critic_update_freq = on_policy_critic_update_freq,
                 λ_targets = λ_targets,
                 lr_alpha = lr_alpha,
+                betas = betas,
+                fear_factor = fear_factor,
+
                 )
 
 
