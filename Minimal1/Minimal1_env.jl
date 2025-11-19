@@ -55,25 +55,47 @@ curtailment_threshold = 0.4
 
 history_steps = 5
 
-function generate_wind()
+function generate_wind(; same_day = false)
     global history_steps, te, dt
 
     wind_steps = Int(te/dt) + history_steps
 
-    wind_constant_day = rand()
+    if same_day
+        rand1 = 0.6
+        rand2 = 0.2
+        rand3 = 0.3
+        rand4 = 0.3
+        rand5 = 0.3
+        rand6 = 0.3
+        rand7 = 0.3
+        rand8 = 0.1
+    else
+        rand1 = rand()
+        rand2 = randn()
+        rand3 = rand()
+        rand4 = rand()
+        rand5 = randn()
+        rand6 = rand()
+        rand7 = rand()
+        rand8 = randn()
+    end
+
+    #@show rand1, rand2, rand3, rand4, rand5, rand6, rand7, rand8
+
+    wind_constant_day = rand1
     deviation = 1/5
 
-    result = sign(randn()) * sin.(collect(LinRange(rand()*3+1, 4+rand()*4, wind_steps)))
+    result = sign(rand2) * sin.(collect(LinRange(rand3*3+1, 4+rand4*4, wind_steps)))
 
     for i in 1:4
-        result += sign(randn()) * sin.(collect(LinRange(rand()+4, 5+rand()*i*4, wind_steps)))
+        result += sign(rand5) * sin.(collect(LinRange(rand6+4, 5+rand7*i*4, wind_steps)))
     end
 
     result .-= minimum(result)
     result ./= maximum(result)
     result .*= deviation
 
-    day_wind = sign(randn()) * sin.(collect(LinRange(wind_constant_day*2*pi, 2+wind_constant_day*2*pi, wind_steps)))
+    day_wind = sign(rand8) * sin.(collect(LinRange(wind_constant_day*2*pi, 2+wind_constant_day*2*pi, wind_steps)))
     day_wind .+= 1.0
     day_wind ./= 4
     day_wind .+= 0.25
@@ -86,15 +108,27 @@ function generate_wind()
     result
 end
 
-function generate_grid_price()
+function generate_grid_price(; same_day = false)
     global history_steps, te, dt
+
+    if same_day
+        rand1 = 0.0
+        rand2 = 0.2
+        rand3 = 0.3
+    else
+        rand1 = rand()
+        rand2 = rand()
+        rand3 = rand()
+    end
+
+    #@show rand1, rand2, rand3
 
     grid_price_steps = Int(te/dt) + history_steps
 
     factor = 1.0;
     factor = 0.6;
 
-    gp = (-sin.(collect(LinRange(rand()*1.5*factor, 2+rand()*2.5*factor, grid_price_steps))) .+(1+(rand()*factor)))
+    gp = (-sin.(collect(LinRange(rand1*1.5*factor, 2+rand2*2.5*factor, grid_price_steps))) .+(1+(rand3*factor)))
 
     clamp!(gp, -1, 1)
 
@@ -106,7 +140,7 @@ end
 include_history_steps = 1
 include_gradients = 2
 
-function create_state(; env = nothing, compute_left = 1.0, step = 0, generate_day = true)
+function create_state(; env = nothing, compute_left = 1.0, step = 0, generate_day = true, same_day = false)
     global wind, grid_price, curtailment_threshold, history_steps, dt, include_history_steps, include_gradients
 
 
@@ -114,8 +148,8 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0, generate_da
         y = [1.0]
 
         if generate_day
-            wind = [generate_wind() for i in 1:n_turbines]
-            grid_price = generate_grid_price()
+            wind = [generate_wind(; same_day = same_day) for i in 1:n_turbines]
+            grid_price = generate_grid_price(; same_day = same_day)
         end
 
         time = 0.0
@@ -361,8 +395,9 @@ end
 
 
 
-function generate_random_init()
-    y0 = create_state()
+function generate_random_init(; same_day = false)
+    
+    y0 = create_state(; same_day = same_day)
 
     env.y0 = deepcopy(y0)
     env.y = deepcopy(y0)
@@ -372,7 +407,10 @@ function generate_random_init()
 end
 
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, optimal_trainings  = 0, outer_loops = 500, only_wind_steps = 0, json = false, reward_shaping = reward_shaping, plot_runs = true)
+
+# IPOPT Score for same_day: -0.16820833350564535
+
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 1, optimal_trainings  = 0, outer_loops = 5000, only_wind_steps = 0, json = false, reward_shaping = reward_shaping, plot_runs = true, same_day = false)
     global wind_only, optimal_trajectory
     wind_only = false
     
@@ -479,7 +517,15 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
             while !is_stop
                 reset!(env)
                 agent(PRE_EPISODE_STAGE, env)
-                hook(PRE_EPISODE_STAGE, agent, env)
+
+                if same_day
+                    env.y0 = generate_random_init(; same_day = true)
+                    env.y = deepcopy(env.y0)
+
+                    env.state = env.featurize(; env = env)
+                else
+                    hook(PRE_EPISODE_STAGE, agent, env)
+                end
 
                 while !is_terminated(env) # one episode
                     action = agent(env)
@@ -554,7 +600,7 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
         end
 
         if plot_runs
-            p1 = render_run(; exploration = true)#, plot_values = true)
+            p1 = render_run(; exploration = true, new_day = !same_day)#, plot_values = true)
             #p2 = plot_critic(; return_plot = true)
             #display([p1 p2])
             #display(p1)

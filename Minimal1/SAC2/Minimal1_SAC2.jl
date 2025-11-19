@@ -62,7 +62,7 @@ target_entropy = -0.8f0
 use_popart = false
 
 
-learning_rate = 3e-4
+learning_rate = 3e-5
 learning_rate_critic = 3e-4
 trajectory_length = 1_000_000
 batch_size = 256
@@ -76,6 +76,7 @@ on_policy_critic_update_freq = 2500
 λ_targets = 0.9f0
 lr_alpha = 1e-2
 fear_factor = 1.0f0
+target_frac = 0.3f0
 
 reward_shaping = false
 
@@ -136,7 +137,7 @@ function initialize_setup(;use_random_init = false)
                 lr_alpha = lr_alpha,
                 betas = betas,
                 fear_factor = fear_factor,
-
+                target_frac = target_frac,
                 )
 
 
@@ -208,11 +209,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
     else
         reset!(env)
 
-        y0 = create_state(; generate_day = false)
-
-        env.y0 = deepcopy(y0)
-        env.y = deepcopy(y0)
-        env.state = env.featurize(; env = env)
+        generate_random_init(; same_day = true)
 
         global day_trajectory = CircularArrayTrajectory(;
                 capacity = 288,
