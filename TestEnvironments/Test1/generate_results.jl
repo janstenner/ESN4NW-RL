@@ -19,7 +19,7 @@ end
 # List of algorithms to test
 algorithms = [
     ("SAC", "TestEnvironments/Test1/SAC/Test1_SAC.jl"),
-    ("SAC2", "TestEnvironments/Test1/SAC/Test1_SAC2.jl"),
+    ("SAC2", "TestEnvironments/Test1/SAC2/Test1_SAC2.jl"),
     ("PPO", "TestEnvironments/Test1/PPO/Test1_PPO.jl"),
     ("PPO2", "TestEnvironments/Test1/PPO2/Test1_PPO2.jl"),
     ("PPO3", "TestEnvironments/Test1/PPO3/Test1_PPO3.jl"),
@@ -37,7 +37,7 @@ end
 
 
 
-function collect_runs(n = 3; selected_algorithms::Vector{String} = String[])
+function collect_runs(n = 1; selected_algorithms::Vector{String} = String[])
     # Filter algorithms based on input or use all if none specified
     algs_to_run = if isempty(selected_algorithms)
         algorithms
@@ -116,7 +116,7 @@ function collect_runs(n = 3; selected_algorithms::Vector{String} = String[])
             )
             
             FileIO.save(results_file, "results", results)
-            println("Saved results for $alg_name ($il_type, $rs_type) with seed $seed")
+            println("Saved results for $alg_name with seed $seed")
         end
     end
 
@@ -134,35 +134,6 @@ end
 
 
 
-function validate_agent()
-    scores = Float32[]
-    
-    n_validation_episodes = 100
-    for episode in 1:n_validation_episodes
-        reset!(env)
-        generate_random_init()
-        
-        total_reward = 0.0f0
-        while !env.done
-            
-            if hasproperty(agent.policy, :actor)
-                action = agent.policy.actor.μ(env.state)
-            elseif hasproperty(agent.policy, :approximator)
-                action = agent.policy.approximator.actor.μ(env.state)
-            elseif hasproperty(agent.policy, :behavior_actor)
-                action = agent.policy.behavior_actor(env.state)
-            end
-
-            env(action)
-
-            total_reward += env.reward[1]
-        end
-        
-        push!(scores, total_reward)
-    end
-    
-    return scores
-end
 
 
 

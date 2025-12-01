@@ -1,6 +1,13 @@
 using Random
 using IntervalSets
 using RL
+using FileIO, JLD2
+
+
+
+validation_scores = []
+
+
 
 # configuration
 n_random_variables = 3
@@ -10,12 +17,22 @@ te = 1.0f0
 dt = 0.05f0
 min_best_episode = 1
 
+max_time_steps = Int(floor((te - t0) / dt)) + 1
+random_state_values = rand(Float32, n_random_variables, max_time_steps)
+reward_noise_values = randn(Float32, max_time_steps)
+
 
 action_dim = 1
 
+function time_to_index(time_value)
+    idx = Int(floor((time_value - t0) / dt)) + 1
+    return clamp(idx, 1, max_time_steps)
+end
+
 function build_state(time_value)
+    idx = time_to_index(time_value)
     time_fraction = clamp(Float32(time_value / te), 0.0f0, 1.0f0)
-    return vcat(Float32[time_fraction], rand(Float32, n_random_variables))
+    return vcat(Float32[time_fraction], random_state_values[:, idx])
 end
 
 y0 = build_state(t0)
@@ -43,12 +60,16 @@ function do_step(env)
     p_val = env.p isa AbstractArray ? env.p[1] : env.p
     p_val = Float32(p_val)
 
-    reward = sin(2f0 * Float32(pi) * p_val) * 0.2f0 + Float32(randn())
+    idx = time_to_index(env.time)
+    noise = reward_noise_values[idx]
+
+    reward = p_val * (sin(2f0 * Float32(pi) * Float32(env.time / env.te)) * 0.2f0 + noise)
     env.reward = [reward]
 
     new_time = min(env.time + env.dt, env.te)
 
-    new_state = Float32[Float32(new_time / env.te); rand(Float32, n_random_variables)...]
+    new_idx = time_to_index(new_time)
+    new_state = Float32[Float32(new_time / env.te); random_state_values[:, new_idx]...]
 
     if new_time >= env.te
         env.done = true
@@ -61,6 +82,9 @@ end
 
 
 function generate_random_init()
+    global random_state_values = rand(Float32, n_random_variables, max_time_steps)
+    global reward_noise_values = randn(Float32, max_time_steps)
+
     y_init = build_state(t0)
 
     env.y0 = deepcopy(y_init)
@@ -73,6 +97,57 @@ function generate_random_init()
 end
 
 
+
+global set = FileIO.load("./Minimal1/validation_set.jld2","set")
+#FileIO.save("./Minimal1/validation_set.jld2","set",set)
+
+
+function generate_validation_set(;n = 100)
+
+    global set = []
+
+    for i in 1:n
+        random_state_values = rand(Float32, n_random_variables, max_time_steps)
+        reward_noise_values = randn(Float32, max_time_steps)
+        push!(set, (random_state_values, reward_noise_values))
+    end
+
+    return set
+end
+
+
+function validate_agent()
+    scores = Float32[]
+    
+    for (rsv, rnv) in set
+
+        global random_state_values = rsv
+        global reward_noise_values = rnv
+        
+        reset!(env)
+        generate_random_init()
+        
+        total_reward = 0.0f0
+        while !env.done
+            
+            if hasproperty(agent.policy, :actor)
+                action = agent.policy.actor.μ(env.state)
+            elseif hasproperty(agent.policy, :approximator)
+                action = agent.policy.approximator.actor.μ(env.state)
+            elseif hasproperty(agent.policy, :behavior_actor)
+                action = agent.policy.behavior_actor(env.state)
+            end
+
+            env(action)
+
+            total_reward += env.reward[1]
+        end
+        
+        push!(scores, total_reward)
+    end
+    
+    return scores
+end
 
 
 
@@ -100,8 +175,8 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
     end
 
 
-    
-    global logs = []
+    global validation_scores
+    global agent_save
 
     
 
@@ -158,8 +233,18 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             println(hook.bestreward)
 
-            # hook.rewards = clamp.(hook.rewards, -3000, 0)
+            current_score = mean(validate_agent())
+            if !isempty(validation_scores) && current_score > maximum(validation_scores)
+                agent_save = deepcopy(agent)
+            end
+            
+            push!(validation_scores, current_score)
 
+            if !isempty(validation_scores)
+                println(lineplot(validation_scores, title="Validation scores", xlabel="Episode", ylabel="Score", color=:cyan))
+
+                println("Best validation score: $(maximum(validation_scores))")
+            end
             
         end
 
