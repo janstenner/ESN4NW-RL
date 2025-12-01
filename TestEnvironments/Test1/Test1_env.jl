@@ -8,7 +8,7 @@ n_random_variables = 3
 t0 = 0.0f0
 te = 1.0f0
 dt = 0.05f0
-
+min_best_episode = 1
 
 
 action_dim = 1
@@ -78,7 +78,7 @@ end
 
 
 
-function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 50, outer_loops = 50, plot_runs = true)
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, outer_loops = 10, plot_runs = true)
     
     rm(dirpath * "/training_frames/", recursive=true, force=true)
     mkdir(dirpath * "/training_frames/")
