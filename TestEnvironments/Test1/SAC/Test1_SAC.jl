@@ -40,8 +40,8 @@ gpu_env = false
 
 
 # agent tuning parameters
-nna_scale = 6.4
-nna_scale_critic = 3.2
+nna_scale = 1.6
+nna_scale_critic = 0.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -65,7 +65,7 @@ learning_rate = 3e-4
 trajectory_length = 1_000_000
 batch_size = 256
 update_after = 200_000
-update_freq = 50
+update_freq = 300
 update_loops = 3
 clip_grad = 0.5
 start_logσ = -1.5

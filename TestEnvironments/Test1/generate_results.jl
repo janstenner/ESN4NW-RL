@@ -21,7 +21,7 @@ algorithms = [
     ("SAC", "TestEnvironments/Test1/SAC/Test1_SAC.jl"),
     ("SAC2", "TestEnvironments/Test1/SAC2/Test1_SAC2.jl"),
     ("PPO", "TestEnvironments/Test1/PPO/Test1_PPO.jl"),
-    ("PPO2", "TestEnvironments/Test1/PPO2/Test1_PPO2.jl"),
+    #("PPO2", "TestEnvironments/Test1/PPO2/Test1_PPO2.jl"),
     ("PPO3", "TestEnvironments/Test1/PPO3/Test1_PPO3.jl"),
     ("DDPG", "TestEnvironments/Test1/DDPG/Test1_DDPG.jl")
 ]
@@ -61,32 +61,32 @@ function collect_runs(n = 1; selected_algorithms::Vector{String} = String[])
             default_params = Dict(
                 "SAC2" => Dict(
                     "inner_loops" => 10,
-                    "outer_loops" => 10,
+                    "outer_loops" => 25,
                     "num_steps" => 10_000
                 ),
                 "SAC" => Dict(
                     "inner_loops" => 10,
-                    "outer_loops" => 10,
+                    "outer_loops" => 25,
                     "num_steps" => 10_000
                 ),
                 "PPO" => Dict(
                     "inner_loops" => 10,
-                    "outer_loops" => 10,
+                    "outer_loops" => 25,
                     "num_steps" => 10_000
                 ),
                 "PPO2" => Dict(
                     "inner_loops" => 10,
-                    "outer_loops" => 10,
+                    "outer_loops" => 25,
                     "num_steps" => 10_000
                 ),
                 "PPO3" => Dict(
                     "inner_loops" => 10,
-                    "outer_loops" => 10,
+                    "outer_loops" => 25,
                     "num_steps" => 10_000
                 ),
                 "DDPG" => Dict(
                     "inner_loops" => 10,
-                    "outer_loops" => 10,
+                    "outer_loops" => 25,
                     "num_steps" => 10_000
                 )
             )
@@ -128,7 +128,7 @@ function collect_runs(n = 1; selected_algorithms::Vector{String} = String[])
         println("Algorithm: $alg")
         
         n_seeds = length(keys(results[alg]))
-        println("  └─ $il_type: $n_seeds seeds")
+        println("  └─ $n_seeds seeds")
     end
 end
 
@@ -211,8 +211,6 @@ function plot_comparison(; current = false)
         if key != "Optimal" && key != "Untrained"
             parts = split(key, "-")
             alg = parts[1]
-            il_type = parts[2]
-            rs_type = parts[3]
             
             # Define semi-muted, aesthetic base colors for algorithms
             base_color = if alg == "SAC"

@@ -41,8 +41,8 @@ gpu_env = false
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 6.4
-nna_scale_critic = 3.2
+nna_scale = 1.6
+nna_scale_critic = 0.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -59,23 +59,23 @@ gamma = y
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 7000
+update_freq = 800
 
 
 learning_rate = 1e-4
 learning_rate_critic = 2e-4
 n_epochs = 10
 n_microbatches = 1
-actorbatch_size = 2000
+actorbatch_size = 400
 logσ_is_network = true
 max_σ = 1.0f0
-entropy_loss_weight = 0.1
-clip_grad = 0.4
-target_kl = 0.01 #0.001
+entropy_loss_weight = 0.001
+clip_grad = 0.8
+target_kl = 0.1 #0.001
 clip1 = false
 start_logσ = -0.6
 tanh_end = true
-clip_range = 0.1f0
+clip_range = 0.2f0
 clip_range_vf = nothing#0.4f0
 
 betas = (0.9, 0.99)
@@ -83,7 +83,7 @@ noise = nothing #"perlin"
 noise_scale = 20
 normalize_advantage = true
 fear_scale = 0.4
-new_loss = true
+new_loss = false
 adaptive_weights = true
 
 reward_shaping = false

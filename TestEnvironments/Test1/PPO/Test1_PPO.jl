@@ -41,8 +41,8 @@ gpu_env = false
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 6.4
-nna_scale_critic = 3.2
+nna_scale = 1.6
+nna_scale_critic = 0.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -59,13 +59,13 @@ gamma = y
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 
-update_freq = 60_000
+update_freq = 800
 
 
 learning_rate = 1e-4
 learning_rate_critic = 3e-4
 n_epochs = 5
-n_microbatches = 100
+n_microbatches = 10
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0#.1agen

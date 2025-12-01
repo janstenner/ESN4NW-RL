@@ -41,8 +41,8 @@ gpu_env = false
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 6.4
-nna_scale_critic = 3.2
+nna_scale = 1.6
+nna_scale_critic = 0.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -59,9 +59,9 @@ batch_size = 256
 start_steps = -1
 start_policy = ZeroPolicy(actionspace)
 update_after = 200_000
-update_freq = 10
+update_freq = 20
 update_loops = 3
-reset_stage = POST_EPISODE_STAGE
+reset_stage = POST_EXPERIMENT_STAGE
 learning_rate = 5e-5
 learning_rate_critic = 1e-4
 clip_grad = 0.5

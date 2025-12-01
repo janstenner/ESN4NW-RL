@@ -41,8 +41,8 @@ gpu_env = false
 
 
 # agent tuning parameters
-nna_scale = 6.4
-nna_scale_critic = 3.2
+nna_scale = 1.6
+nna_scale_critic = 0.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -54,7 +54,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 1.0f0
+y = 0.99f0
 gamma = y
 a = 3f-2 #0.2f0
 t = 0.02f0
@@ -65,18 +65,20 @@ use_popart = false
 learning_rate = 3e-4
 learning_rate_critic = 3e-4
 trajectory_length = 1_000_000
-batch_size = 256
+batch_size = 32
 update_after = 100_000
 update_freq = 50
 update_loops = 1
 clip_grad = 0.5
 start_logσ = -1.5
 automatic_entropy_tuning = true
-on_policy_critic_update_freq = 2500
+on_policy_critic_update_freq = 300
 λ_targets = 0.9f0
 lr_alpha = 1e-2
 fear_factor = 1.0f0
-target_frac = 0.3f0
+target_frac = 0.1f0
+
+verbose = false
 
 reward_shaping = false
 
@@ -138,6 +140,7 @@ function initialize_setup(;use_random_init = false)
                 betas = betas,
                 fear_factor = fear_factor,
                 target_frac = target_frac,
+                verbose = verbose,
                 )
 
 
