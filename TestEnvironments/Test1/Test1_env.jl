@@ -98,8 +98,8 @@ end
 
 
 
-global set = FileIO.load("./Minimal1/validation_set.jld2","set")
-#FileIO.save("./Minimal1/validation_set.jld2","set",set)
+global set = FileIO.load("./TestEnvironments/Test1/validation_set.jld2","set")
+#FileIO.save("./TestEnvironments/Test1/validation_set.jld2","set",set)
 
 
 function generate_validation_set(;n = 100)
@@ -123,7 +123,7 @@ function validate_agent()
 
         global random_state_values = rsv
         global reward_noise_values = rnv
-        
+
         reset!(env)
         generate_random_init()
         
