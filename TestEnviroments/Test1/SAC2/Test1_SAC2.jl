@@ -157,8 +157,9 @@ initialize_setup()
 
 
 
-function render_run(; exploration = true, return_plot = false)
+function render_run(; exploration = false, return_plot = false)
     rewards = Float64[]
+    actions_taken = Float64[]
 
     reset!(env)
     generate_random_init()
@@ -168,6 +169,8 @@ function render_run(; exploration = true, return_plot = false)
         action = exploration ? agent(env) : agent.policy.actor.μ(env.state)
         env(action)
         push!(rewards, env.reward[1])
+        p_val = env.p isa AbstractArray ? env.p[1] : env.p
+        push!(actions_taken, Float64(p_val))
     end
 
     time_axis = (0:length(rewards)-1) .* dt
@@ -176,10 +179,18 @@ function render_run(; exploration = true, return_plot = false)
         plot_bgcolor = "white",
         xaxis = attr(title = "Time"),
         yaxis = attr(title = "Reward"),
-        showlegend = false,
+        yaxis2 = attr(
+            overlaying = "y",
+            side = "right",
+            title = "Action",
+        ),
+        showlegend = true,
     )
 
-    plot_data = [scatter(x = time_axis, y = rewards, mode = "lines+markers", name = "Reward per step")]
+    plot_data = [
+        scatter(x = time_axis, y = rewards, mode = "lines+markers", name = "Reward per step"),
+        scatter(x = time_axis, y = actions_taken, mode = "lines+markers", name = "Action (env.p)", yaxis = "y2"),
+    ]
 
     plt = plot(plot_data, layout)
 

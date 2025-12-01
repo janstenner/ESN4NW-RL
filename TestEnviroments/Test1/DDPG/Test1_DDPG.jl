@@ -131,113 +131,50 @@ end
 
 initialize_setup()
 
-trajectories_file = "optimal_trajectories.jld2"
-if isfile(trajectories_file)
-    try
-        trajectories = FileIO.load(trajectories_file, "trajectories")
-        optimal_group = get(trajectories, "SAC_DDPG", Dict())
-        optimal_trajectory = get(optimal_group, "with_RS", nothing)
-    catch err
-        @warn "Could not load optimal trajectories" exception = err
-        optimal_trajectory = nothing
-    end
-else
-    optimal_trajectory = nothing
-end
 
 
 
 
-function render_run(use_best = false; exploration = true)
-    if use_best
-        copyto!(agent.policy.behavior_actor, hook.bestNNA)
-    end
-
-
-    temp_start_steps = agent.policy.start_steps
-    agent.policy.start_steps  = -1
-    
-    temp_update_after = agent.policy.update_after
-    agent.policy.update_after = 100000
-
-    agent.policy.update_step = 0
-    global rewards = Float64[]
-    reward_sum = 0.0
-
-    #w = Window()
-
-    results_run = Dict("rewards" => [], "loadleft" => [])
-
-    for k in 1:n_turbines
-        results_run["hpc$k"] = []
-    end
-
-    global currentDF = DataFrame()
+function render_run(; exploration = false, return_plot = false)
+    rewards = Float64[]
+    actions_taken = Float64[]
 
     reset!(env)
     generate_random_init()
 
+
     while !env.done
-        if exploration
-            action = agent(env)
-        else
-            action = agent.policy.behavior_actor(env)
-        end
-
-        #action = env.y[6] < 0.27 ? [-1.0] : [1.0]
-
+        action = exploration ? agent(env) : agent.policy.behavior_actor(env.state)
         env(action)
-
-        for k in 1:n_turbines
-            push!(results_run["hpc$k"], env.p[k])
-        end
-        push!(results_run["rewards"], env.reward[1])
-        push!(results_run["loadleft"], env.y[1])
-
-        # println(mean(env.reward))
-
-        reward_sum += mean(env.reward)
-        # push!(rewards, mean(env.reward))
-
-        tmp = DataFrame()
-        insertcols!(tmp, :timestep => env.steps)
-        insertcols!(tmp, :action => [vec(env.action)])
-        insertcols!(tmp, :p => [send_to_host(env.p)])
-        insertcols!(tmp, :y => [send_to_host(env.y)])
-        insertcols!(tmp, :reward => [reward(env)])
-        append!(hook.currentDF, tmp)
+        push!(rewards, env.reward[1])
+        p_val = env.p isa AbstractArray ? env.p[1] : env.p
+        push!(actions_taken, Float64(p_val))
     end
 
-    if use_best
-        copyto!(agent.policy.behavior_actor, hook.currentNNA)
-    end
-
-    agent.policy.start_steps = temp_start_steps
-    agent.policy.update_after = temp_update_after
-
-    println(reward_sum)
-
+    time_axis = (0:length(rewards)-1) .* dt
 
     layout = Layout(
-                    plot_bgcolor="#f1f3f7",
-                    yaxis=attr(range=[0,1]),
-                    yaxis2 = attr(
-                        overlaying="y",
-                        side="right",
-                        titlefont_color="orange",
-                        #range=[-1, 1]
-                    ),
-                )
+        plot_bgcolor = "white",
+        xaxis = attr(title = "Time"),
+        yaxis = attr(title = "Reward"),
+        yaxis2 = attr(
+            overlaying = "y",
+            side = "right",
+            title = "Action",
+        ),
+        showlegend = true,
+    )
 
-    to_plot = [scatter(y=results_run["rewards"], name="reward", yaxis = "y2"),
-                scatter(y=results_run["loadleft"], name="load left"),
-                scatter(y=grid_price, name="grid price")]
-    for k in 1:n_turbines
-        push!(to_plot, scatter(y=results_run["hpc$k"], name="hpc$k"))
-        push!(to_plot, scatter(y=wind[k], name="wind$k"))
+    plot_data = [
+        scatter(x = time_axis, y = rewards, mode = "lines+markers", name = "Reward per step"),
+        scatter(x = time_axis, y = actions_taken, mode = "lines+markers", name = "Action (env.p)", yaxis = "y2"),
+    ]
+
+    plt = plot(plot_data, layout)
+
+    if return_plot
+        return plt
+    else
+        display(plt)
     end
-    p = plot(Vector{AbstractTrace}(to_plot), layout)
-
-    display(p)
-
 end

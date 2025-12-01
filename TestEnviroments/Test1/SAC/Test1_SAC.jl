@@ -136,424 +136,50 @@ end
 
 initialize_setup()
 
-trajectories_file = "optimal_trajectories.jld2"
-if isfile(trajectories_file)
-    try
-        trajectories = FileIO.load(trajectories_file, "trajectories")
-        optimal_group = get(trajectories, "SAC_DDPG", Dict())
-        optimal_trajectory = get(optimal_group, "with_RS", nothing)
-    catch err
-        @warn "Could not load optimal trajectories" exception = err
-        optimal_trajectory = nothing
-    end
-else
-    optimal_trajectory = nothing
-end
 
 
 
 
-
-function render_run(; plot_optimal = false, steps = 6000, show_training_episode = false, show_σ = false, exploration = false, return_plot = false, plot_values = true, plot_critic2 = false, critic2_diagnostics = false, json = false)
-    global history_steps
-
-    if show_training_episode
-        training_episode = length(hook.rewards)
-    end
-
-
-    # if use_best
-    #     copyto!(agent.policy.behavior_actor, hook.bestNNA)
-    # end
-
-    # temp_noise = agent.policy.act_noise
-    # agent.policy.act_noise = 0.0
-
-    # temp_start_steps = agent.policy.start_steps
-    # agent.policy.start_steps  = -1
-    
-    # temp_update_after = agent.policy.update_after
-    # agent.policy.update_after = 100000
-
-
-    # agent.policy.update_step = 0
-    global rewards = Float64[]
-    reward_sum = 0.0
-
-    #w = Window()
-
-    xx = collect(dt/60:dt/60:te/60)
-
-    global results_run = Dict("rewards" => [], "loadleft" => [])
-
-    for k in 1:n_windCORES
-        results_run["hpc$k"] = []
-        results_run["σ$k"] = []
-    end
-
-    q1 = []
-    q2 = []
-    states = []
-    terminals = []
+function render_run(; exploration = false, return_plot = false)
+    rewards = Float64[]
+    actions_taken = Float64[]
 
     reset!(env)
     generate_random_init()
 
-    global run_logs = []
 
     while !env.done
-
-        if exploration
-            action = agent(env)
-        else
-            action = agent.policy.actor.μ(env.state)
-        end
-        
-
-        #action = agent(env)
-        step_dict = Dict()
-
-        push!(q1, agent.policy.qnetwork1(vcat(env.state, action))[1])
-        push!(q2, agent.policy.qnetwork2(vcat(env.state, action))[1])
-
-        if json
-            step_dict["step"] = env.steps
-            step_dict["state"] = env.state
-            step_dict["action"] = action
-            step_dict["q1"] = q1[end]
-            step_dict["q2"] = q2[end]
-        end
-
-        env(action; reward_shaping = reward_shaping)
-
-        push!(terminals, env.done)
-
-        if json
-            step_dict["next_state"] = env.state
-            step_dict["terminated"] = env.done
-            step_dict["reward"] = env.reward[1]
-            push!(run_logs, step_dict)
-        end
-
-        for k in 1:n_windCORES
-            push!(results_run["hpc$k"], clamp((action[1]+1)*0.5, 0, 1)) #env.p[k])
-            #push!(results_run["σ$k"], σ[k])
-        end
-        push!(results_run["rewards"], env.reward[1])
-        push!(results_run["loadleft"], env.y[1])
-
-        # println(mean(env.reward))
-
-        reward_sum += mean(env.reward)
-        # push!(rewards, mean(env.reward))
-
-        
+        action = exploration ? agent(env) : agent.policy.actor.μ(env.state)
+        env(action)
+        push!(rewards, env.reward[1])
+        p_val = env.p isa AbstractArray ? env.p[1] : env.p
+        push!(actions_taken, Float64(p_val))
     end
 
-    # if use_best
-    #     copyto!(agent.policy.behavior_actor, hook.currentNNA)
-    # end
-
-    # agent.policy.start_steps = temp_start_steps
-    # agent.policy.act_noise = temp_noise
-    # agent.policy.update_after = temp_update_after
-
-    println(reward_sum)
-
-
-    colorscale = [[0, "rgb(255, 0, 0)"], [0.5, "rgb(255, 255, 255)"], [1, "rgb(0, 255, 0)"], ]
+    time_axis = (0:length(rewards)-1) .* dt
 
     layout = Layout(
-                    plot_bgcolor = "white",
-                    font=attr(
-                        family="Arial",
-                        size=16,
-                        color="black"
-                    ),
-                    showlegend = true,
-                    legend=attr(x=0.5, y=-0.1, orientation="h", xanchor="center"),
-                    xaxis = attr(gridcolor = "#E0E0E0FF",
-                                linecolor = "#888888"),
-                    yaxis = attr(gridcolor = "#E0E0E0FF",
-                                linecolor = "#888888",
-                    ),#range=[0,1]),
-                    yaxis2 = attr(
-                        overlaying="y",
-                        side="right",
-                        titlefont_color="orange",
-                        #range=[-1, 1]
-                    ),
-                )
-
-    if show_training_episode
-        layout.title = "Evaluation Episode after $(training_episode) Training Episodes"
-    end
-
-    
-
-    to_plot = AbstractTrace[]
-    
-    if show_σ
-        for k in 1:n_windCORES
-            push!(to_plot, scatter(x=xx, y=results_run["σ$k"], name="σ$k", yaxis = "y2"))
-        end
-    else
-        push!(to_plot, scatter(x=xx, y=results_run["rewards"], name="Reward", yaxis = "y2"))
-    end
-
-    if plot_values
-        # push!(to_plot, scatter(x=xx, y=q1, name="q1", yaxis = "y2"))
-        # push!(to_plot, scatter(x=xx, y=q2, name="q2", yaxis = "y2"))
-
-        push!(to_plot, scatter(x=xx, y=min.(q1, q2), name="min.(q1, q2)", yaxis = "y2"))
-    end
-
-    push!(to_plot, scatter(x=xx, y=results_run["loadleft"], name="Load Left"))
-    push!(to_plot, scatter(x=xx, y=grid_price[history_steps:end], name="Grid Price"))
-
-
-    for k in 1:n_windCORES
-        push!(to_plot, scatter(x=xx, y=results_run["hpc$k"], name="WindCORE utilization $k"))
-        #line=attr(color = "rgba(200, 200, 200, 0.3)")))
-    end
-
-
-    for k in 1:n_turbines
-        push!(to_plot, scatter(x=xx, y=wind[k][history_steps:end], name="Wind Power $k"))
-    end
-    
-
-    if plot_optimal
-        global optimal_actions = optimize_day(steps)
-        global optimal_rewards = evaluate(optimal_actions; collect_rewards = true)
-
-        for k in 1:n_windCORES
-            push!(to_plot, scatter(x=xx, y=optimal_actions[k,:], name="Optimal HPC$k"))
-        end
-        push!(to_plot, scatter(x=xx, y=optimal_rewards, name="Optimal Reward", yaxis = "y2"))
-
-
-        println("")
-        println("--------------------------------------------")
-        println("AGENT:   $reward_sum")
-        println("IPOPT:   $(sum(optimal_rewards))")
-        println("--------------------------------------------")
-    end
-
-    plott = plot(Vector(to_plot), layout)
-
-    if return_plot
-        return plott
-    else
-        display(plott)
-    end
-
-    if plot_critic2
-
-        colorscale2 = [[0.0, "rgb(50, 0, 50)"], [0.25, "rgb(200, 0, 0)"], [0.5, "rgb(210, 210, 0)"], [0.75, "rgb(0, 210, 0)"], [1.0, "rgb(140, 255, 255)"]]
-
-        layout = Layout(
-                plot_bgcolor="#f1f3f7",
-                coloraxis = attr(cmid = 0, colorscale = colorscale2),
-            )
-
-        actions = collect(-1:0.02:1)
-
-        if critic2_diagnostics
-            global new_states = []
-            temp_state = deepcopy(states[1])
-
-            temp_state[2] = 1.0f0
-
-            wind_index = 2 + include_history_steps - 1 + include_gradients + 2
-
-            for i in 3:wind_index-2
-                temp_state[i] = 0.0f0
-            end
-
-            temp_state[wind_index] = 0.0f0
-            
-            for i in wind_index+1:length(temp_state)-2
-                temp_state[i] = 0.0f0
-            end
-
-            temp_state[end-1] = clamp(temp_state[6] - curtailment_threshold, 0.0f0, 1.0f0)
-
-            push!(new_states, deepcopy(temp_state))
-
-            xx = [0.0f0]
-
-            for i in 1:288
-                temp_state[wind_index] += 1.0f0 / 288.0f0
-                temp_state[end-1] = clamp(temp_state[wind_index] - curtailment_threshold, 0.0f0, 1.0f0)
-                push!(new_states, deepcopy(temp_state))
-                push!(xx, temp_state[wind_index])
-            end
-
-            states = new_states
-        end
-
-        results_critic2 = zeros(Float32, length(actions), length(states))
-
-        for (i,state) in enumerate(states)
-            inputs = vcat(repeat(state, 1, length(actions)), actions')
-
-            mu = agent.policy.approximator.actor.μ(state)[:]
-            mu_value = agent.policy.approximator.critic2(vcat(state, mu))
-            mu_values = mu_value .* ones(length(actions))
-
-            critic2_values = agent.policy.approximator.critic2(inputs)[:] #-1 first
-
-            results_critic2[:,i] = critic2_values - mu_values
-        end
-
-        results_critic2 = (results_critic2 .- mean(results_critic2)) ./ clamp(std(results_critic2), 1e-8, 1000.0)
-
-        min_val = - maximum(abs.(results_critic2))
-
-        for (i,state) in enumerate(states)
-
-            if critic2_diagnostics
-                idx = clamp(searchsortedfirst(actions, state[end-1] * 2 - 1), 1, length(actions))
-
-                idx2 = findmax(results_critic2[:,i])[2]
-                results_critic2[idx2,i] = -min_val
-            else
-                idx = clamp(searchsortedfirst(actions, mus[i]), 1, length(actions))
-            end
-
-            results_critic2[idx,i] = min_val
-        end
-
-        display(plot(heatmap(x = xx, y = actions, z=results_critic2, coloraxis="coloraxis"), layout))
-
-    end
-end
-
-
-
-function get_state(x, y)
-    st = Float32[0.8; 0.0; 0.0; 0.0; 0.0; 0.0; 0.4; 0.0; 0.0; 0.0; 0.0; 0.0; 0.0; 0.2;;]
-
-    grid_base = Float32[0.05310250000000005, 0.06105506000000005, 0.06905967000000002, 0.07711570000000001, 0.08522229999999997]
-    wind_base = Float32[0.05310250000000005, 0.06105506000000005, 0.06905967000000002, 0.07711570000000001, 0.08522229999999997]
-
-    st[2:6] .= grid_base .+ x * 0.9
-    st[8:12] .= wind_base .+ y * 0.9
-
-    st[13] = max(0.0, st[8] - curtailment_threshold)
-
-    st
-end
-
-function plot_critic(; return_plot = false)
-    xx = collect(0:0.025:1)
-    yy = xx
-    
-    critic_values = zeros(Float32, length(xx), length(yy))
-
-    for (i, _) in enumerate(xx), (j, _) in enumerate(yy)
-        st = get_state(i, j)
-
-        critic_value = agent.policy.approximator.critic(st)[1]
-
-        critic_values[i, j] = critic_value
-    end
-    
-
-    p = plot(surface(x=xx, y=yy, z=critic_values), Layout(
-        scene = attr(
-            xaxis_title="grid price",
-            yaxis_title="wind power",
-            zaxis_title="Critic Value"
-        )
-    ))
-
-    if return_plot
-        return p
-    else
-        display(p)
-    end
-end
-
-
-function plot_trajectory()
-    t = agent.trajectory
-    AC = agent.policy.approximator
-    states = collect(flatten_batch(t[:state]))
-    actions = collect(flatten_batch(t[:action]))
-
-    values = AC.critic(states)
-    next_values = values + AC.critic2(vcat(states, actions))
-
-    advantages, returns = generalized_advantage_estimation(
-        t[:reward],
-        values,
-        next_values,
-        y,
-        p;
-        dims=2,
-        terminal=t[:terminal]
+        plot_bgcolor = "white",
+        xaxis = attr(title = "Time"),
+        yaxis = attr(title = "Reward"),
+        yaxis2 = attr(
+            overlaying = "y",
+            side = "right",
+            title = "Action",
+        ),
+        showlegend = true,
     )
 
-    colorscale = [[0, "rgb(255, 0, 0)"], [0.5, "rgb(255, 255, 255)"], [1, "rgb(0, 255, 0)"], ]
+    plot_data = [
+        scatter(x = time_axis, y = rewards, mode = "lines+markers", name = "Reward per step"),
+        scatter(x = time_axis, y = actions_taken, mode = "lines+markers", name = "Action (env.p)", yaxis = "y2"),
+    ]
 
-    layout = Layout(
-                    plot_bgcolor = "white",
-                    font=attr(
-                        family="Arial",
-                        size=16,
-                        color="black"
-                    ),
-                    showlegend = true,
-                    legend=attr(x=0.5, y=-0.1, orientation="h", xanchor="center"),
-                    xaxis = attr(gridcolor = "#E0E0E0FF",
-                                linecolor = "#888888"),
-                    yaxis = attr(gridcolor = "#E0E0E0FF",
-                                linecolor = "#888888",
-                                range=[0,1]),
-                    yaxis2 = attr(
-                        overlaying="y",
-                        side="right",
-                        titlefont_color="orange",
-                        #range=[-1, 1]
-                    ),
-                )
+    plt = plot(plot_data, layout)
 
-    to_plot = AbstractTrace[]
-    
-
-    push!(to_plot, scatter(y=advantages[:], name="Advantage", yaxis = "y2",
-            mode="lines+markers",
-            marker=attr(
-                color=advantages[:],               # array of numbers
-                cmin = -0.01,
-                cmid = 0.0,
-                cmax = 0.01,
-                colorscale=colorscale,
-                showscale=false
-            ),
-            line=attr(color = "rgba(200, 200, 200, 0.3)")))
-    
-    push!(to_plot, scatter(y=t[:reward][:], name="Reward", yaxis = "y2"))
-    
-
-
-    push!(to_plot, scatter(y=values[:], name="Critic Values", yaxis = "y2"))
-    push!(to_plot, scatter(y=next_values[:], name="Next Value", yaxis = "y2"))
-    push!(to_plot, scatter(y=returns[:], name="Return", yaxis = "y2"))
-
-
-    push!(to_plot, scatter(y=states[1,:], name="Load Left"))
-    push!(to_plot, scatter(y=states[2,:], name="Grid Price"))
-
-    push!(to_plot, scatter(y=t[:action][:], name="WindCORE utilization 1"))
-
-    push!(to_plot, scatter(y=states[6,:], name="Wind Power 1"))
-
-    push!(to_plot, scatter(y=Float32.(t[:terminal][:]), name="Terminal"))
-
-    plott = plot(Vector(to_plot), layout)
-
-    display(plott)
+    if return_plot
+        return plt
+    else
+        display(plt)
+    end
 end
