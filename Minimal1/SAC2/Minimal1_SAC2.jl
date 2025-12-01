@@ -58,11 +58,11 @@ y = 1.0f0
 gamma = y
 a = 3f-2 #0.2f0
 t = 0.02f0
-target_entropy = -0.8f0
+target_entropy = -0.9f0
 use_popart = false
 
 
-learning_rate = 3e-5
+learning_rate = 3e-4
 learning_rate_critic = 3e-4
 trajectory_length = 1_000_000
 batch_size = 256

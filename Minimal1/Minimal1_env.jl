@@ -578,20 +578,22 @@ function train(use_random_init = true; visuals = false, num_steps = 10_000, inne
 
             println(hook.bestreward)
 
-            if @isdefined(validate_agent)
-                current_score = mean(validate_agent())
+            if !same_day
+                if @isdefined(validate_agent)
+                    current_score = mean(validate_agent())
 
-                if !isempty(validation_scores) && current_score > maximum(validation_scores)
-                    agent_save = deepcopy(agent)
+                    if !isempty(validation_scores) && current_score > maximum(validation_scores)
+                        agent_save = deepcopy(agent)
+                    end
+                    
+                    push!(validation_scores, current_score)
                 end
-                
-                push!(validation_scores, current_score)
-            end
 
-            if !isempty(validation_scores)
-                println(lineplot(validation_scores, title="Validation scores", xlabel="Episode", ylabel="Score", color=:cyan))
+                if !isempty(validation_scores)
+                    println(lineplot(validation_scores, title="Validation scores", xlabel="Episode", ylabel="Score", color=:cyan))
 
-                println("Best validation score: $(maximum(validation_scores))")
+                    println("Best validation score: $(maximum(validation_scores))")
+                end
             end
 
             # hook.rewards = clamp.(hook.rewards, -3000, 0)
