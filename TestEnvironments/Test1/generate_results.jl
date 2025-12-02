@@ -156,7 +156,7 @@ function plot_comparison()
     
     # Initialize dictionary to store all validation results
     global best_validation_results = Dict{String, Any}()
-    global all_validation_results = Dict{String, Dict{Int, Any}}()
+    global all_validation_results = Dict{String, Any}()
 
     
     # Go through all results and validate each agent
@@ -362,26 +362,60 @@ function plot_comparison()
 
     traces4 = AbstractTrace[]
     
-    # Add traces in the same order
+    # Add traces in the same order, plotting element-wise mean with std band
     for key in order
         _, timelines = all_validation_results[key]
         
-        # Skip if timelines is nothing
-        if !isnothing(timelines)
-            color = color_map[key]
-            
-            push!(traces4, scatter(
-                y=timelines,
-                name=key,
-                mode="lines",
-                line_color="rgb($(color[1]), $(color[2]), $(color[3]))"
-            ))
+        if isnothing(timelines) || isempty(timelines)
+            continue
         end
+
+        color = get(color_map, key, [80, 80, 80])
+
+        # ensure equal length by using the minimum length across timelines
+        common_len = minimum(length.(timelines))
+        xs = 1:common_len
+
+        means = Float64[]
+        stds = Float64[]
+        for i in xs
+            vals = [t[i] for t in timelines if length(t) >= i]
+            push!(means, mean(vals))
+            push!(stds, std(vals))
+        end
+
+        lower = means .- stds
+        upper = means .+ stds
+        fillcol = "rgba($(color[1]), $(color[2]), $(color[3]), 0.2)"
+
+        push!(traces4, scatter(
+            x=xs,
+            y=lower,
+            mode="lines",
+            line_color="rgba(0,0,0,0)",
+            showlegend=false
+        ))
+        push!(traces4, scatter(
+            x=xs,
+            y=upper,
+            mode="lines",
+            fill="tonexty",
+            fillcolor=fillcol,
+            line_color="rgba(0,0,0,0)",
+            name="$(key) ± std",
+            showlegend=false
+        ))
+        push!(traces4, scatter(
+            x=xs,
+            y=means,
+            name=key,
+            mode="lines",
+            line_color="rgb($(color[1]), $(color[2]), $(color[3]))"
+        ))
     end
     
-    # Create and display the timeline plot
     layout4 = Layout(
-        title="Validation Score Timeline During Training",
+        title="Validation Score Timeline Mean ± Std",
         yaxis_title="Validation Score",
         xaxis_title="Training Steps",
         showlegend=true,
