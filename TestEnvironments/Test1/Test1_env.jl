@@ -125,7 +125,14 @@ function validate_agent()
         global reward_noise_values = rnv
 
         reset!(env)
-        generate_random_init()
+        
+        y_init = build_state(t0)
+
+        env.y0 = deepcopy(y_init)
+        env.y = deepcopy(y_init)
+        env.state = env.featurize(; env = env)
+        env.done = false
+        env.time = t0
         
         total_reward = 0.0f0
         while !env.done

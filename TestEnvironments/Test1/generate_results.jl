@@ -3,6 +3,10 @@ using FileIO
 using PlotlyJS
 using Statistics
 
+
+# include an agent script to ensure an env gets build
+include("./SAC2/Test1_SAC2.jl")
+
 # File path for saving results
 results_file = "TestEnvironments/Test1/training_results.jld2"
 
@@ -137,7 +141,7 @@ end
 
 
 
-function plot_comparison(; current = false)
+function plot_comparison()
     
     # Ensure results dictionary is loaded
     if !@isdefined(results)
@@ -152,6 +156,7 @@ function plot_comparison(; current = false)
     
     # Initialize dictionary to store all validation results
     global best_validation_results = Dict{String, Any}()
+    global all_validation_results = Dict{String, Dict{Int, Any}}()
 
     
     # Go through all results and validate each agent
@@ -161,6 +166,8 @@ function plot_comparison(; current = false)
         config_scores = Dict{Int, Vector{Float32}}()
         config_means = Dict{Int, Float64}()
         config_timelines = Dict{Int, Vector{Float32}}()
+
+        all_validation_results[alg_name] = (Float32[], [])
         
         for seed in keys(results[alg_name])
             # Get the saved policy
@@ -183,6 +190,9 @@ function plot_comparison(; current = false)
             config_scores[seed] = scores
             config_means[seed] = mean(scores)
             config_timelines[seed] = results[alg_name][seed]["validation_scores"]
+
+            append!(all_validation_results[alg_name][1], scores)
+            push!(all_validation_results[alg_name][2], results[alg_name][seed]["validation_scores"])
         end
         
         # Find the best seed based on mean score
@@ -200,6 +210,10 @@ function plot_comparison(; current = false)
     # First, calculate the order based on mean scores
     order = sort(collect(keys(best_validation_results)), 
                 by=key->mean(best_validation_results[key][1]), 
+                rev=true)  # descending order
+
+    order_all = sort(collect(keys(all_validation_results)), 
+                by=key->mean(all_validation_results[key][1]), 
                 rev=true)  # descending order
 
     # Create color mapping for consistent colors across plots
@@ -251,7 +265,7 @@ function plot_comparison(; current = false)
     
     # Create and display the validation scores plot
     layout1 = Layout(
-        title="Algorithm Performance Comparison",
+        title="Algorithm Performance Comparison - Best Runs",
         yaxis_title="Validation Score",
         showlegend=true,
         legend=attr(
@@ -267,8 +281,47 @@ function plot_comparison(; current = false)
     p1 = plot(traces1, layout1)
     display(p1)
 
-    # Create second plot (validation timelines)
+
+
+    # Create first and second plot (validation scores)
     traces2 = AbstractTrace[]
+    
+    # Add traces in order
+    for key in order_all
+        scores, _ = all_validation_results[key]
+        color = color_map[key]
+        
+        push!(traces2, box(
+            y=scores,
+            name=key,
+            boxpoints="all",
+            quartilemethod="linear",
+            marker_color="rgb($(color[1]), $(color[2]), $(color[3]))"
+        ))
+    end
+    
+    # Create and display the validation scores plot
+    layout2 = Layout(
+        title="Algorithm Performance Comparison - All Runs",
+        yaxis_title="Validation Score",
+        showlegend=true,
+        legend=attr(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.3,
+            xanchor="center",
+            x=0.5
+        ),
+        margin=attr(b=100)
+    )
+    
+    p1 = plot(traces2, layout2)
+    display(p1)
+
+
+
+    # Create third and fourth plot (validation timelines)
+    traces3 = AbstractTrace[]
     
     # Add traces in the same order
     for key in order
@@ -278,7 +331,7 @@ function plot_comparison(; current = false)
         if !isnothing(timeline)
             color = color_map[key]
             
-            push!(traces2, scatter(
+            push!(traces3, scatter(
                 y=timeline,
                 name=key,
                 mode="lines",
@@ -288,7 +341,7 @@ function plot_comparison(; current = false)
     end
     
     # Create and display the timeline plot
-    layout2 = Layout(
+    layout3 = Layout(
         title="Validation Score Timeline During Training",
         yaxis_title="Validation Score",
         xaxis_title="Training Steps",
@@ -303,7 +356,46 @@ function plot_comparison(; current = false)
         margin=attr(b=100)
     )
     
-    p2 = plot(traces2, layout2)
+    p2 = plot(traces3, layout3)
+    display(p2)
+
+
+    traces4 = AbstractTrace[]
+    
+    # Add traces in the same order
+    for key in order
+        _, timelines = all_validation_results[key]
+        
+        # Skip if timelines is nothing
+        if !isnothing(timelines)
+            color = color_map[key]
+            
+            push!(traces4, scatter(
+                y=timelines,
+                name=key,
+                mode="lines",
+                line_color="rgb($(color[1]), $(color[2]), $(color[3]))"
+            ))
+        end
+    end
+    
+    # Create and display the timeline plot
+    layout4 = Layout(
+        title="Validation Score Timeline During Training",
+        yaxis_title="Validation Score",
+        xaxis_title="Training Steps",
+        showlegend=true,
+        legend=attr(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.3,
+            xanchor="center",
+            x=0.5
+        ),
+        margin=attr(b=100)
+    )
+    
+    p2 = plot(traces4, layout4)
     display(p2)
     
     #return p1, p2  # Return both plot objects
