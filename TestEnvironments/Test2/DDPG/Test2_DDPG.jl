@@ -136,8 +136,9 @@ initialize_setup()
 
 
 function render_run(; exploration = false, return_plot = false)
-    rewards = Float64[]
-    actions_taken = Float64[]
+    positions = Float64[]
+    times = Float64[]
+    zone_traces = [Float64[] for _ in 1:3]
 
     reset!(env)
     generate_random_init()
@@ -146,29 +147,60 @@ function render_run(; exploration = false, return_plot = false)
     while !env.done
         action = exploration ? agent(env) : agent.policy.behavior_actor(env.state)
         env(action)
-        push!(rewards, env.reward[1])
-        p_val = env.p isa AbstractArray ? env.p[1] : env.p
-        push!(actions_taken, Float64(p_val))
+        push!(positions, Float64(env.y[1]))
+        push!(times, Float64(env.y[2]))
+        push!(zone_traces[1], Float64(env.y[3]))
+        push!(zone_traces[2], Float64(env.y[4]))
+        push!(zone_traces[3], Float64(env.y[5]))
     end
 
-    time_axis = (0:length(rewards)-1) .* dt
+    time_axis = times
 
     layout = Layout(
         plot_bgcolor = "white",
         xaxis = attr(title = "Time"),
-        yaxis = attr(title = "Reward"),
-        yaxis2 = attr(
-            overlaying = "y",
-            side = "right",
-            title = "Action",
-        ),
+        yaxis = attr(title = "Position / Zones", range = [0, 1]),
         showlegend = true,
     )
 
-    plot_data = [
-        scatter(x = time_axis, y = rewards, mode = "lines+markers", name = "Reward per step"),
-        scatter(x = time_axis, y = actions_taken, mode = "lines+markers", name = "Action (env.p)", yaxis = "y2"),
+    colors = [
+        (255, 215, 0),   # yellow
+        (0, 180, 0),     # green
+        (220, 20, 60),   # red
     ]
+
+    plot_data = AbstractTrace[]
+
+    for i in 1:3
+        lower = zone_traces[i] .- delta_zone
+        upper = zone_traces[i] .+ delta_zone
+        fillcol = "rgba($(colors[i][1]), $(colors[i][2]), $(colors[i][3]), 0.25)"
+
+        push!(plot_data, scatter(
+            x = time_axis,
+            y = lower,
+            mode = "lines",
+            line_color = "rgba(0,0,0,0)",
+            showlegend = false
+        ))
+        push!(plot_data, scatter(
+            x = time_axis,
+            y = upper,
+            mode = "lines",
+            fill = "tonexty",
+            fillcolor = fillcol,
+            line_color = "rgba(0,0,0,0)",
+            name = "Zone $i"
+        ))
+    end
+
+    push!(plot_data, scatter(
+        x = time_axis,
+        y = positions,
+        mode = "lines+markers",
+        name = "Position",
+        line_color = "rgb(50,50,200)"
+    ))
 
     plt = plot(plot_data, layout)
 

@@ -80,7 +80,7 @@ end
 
 function prepare_action(action0 = nothing, t0 = nothing; env = nothing)
     action = isnothing(env) ? action0 : env.action
-    a = clamp(action, -1.0, 1.0)
+    a = clamp.(action, -1.0, 1.0)
     return 0.1f0 .* a
 end
 
@@ -119,7 +119,6 @@ function do_step(env)
     # advance time and step index
     new_time = min(env.time + env.dt, env.te)
 
-    env.y[1] .= x_new
 
     # next state uses centers for the next segment (based on new step index)
     new_state = build_state(x_new, step_idx + 1)
@@ -208,4 +207,156 @@ function validate_agent()
     end
 
     return scores
+end
+
+
+
+function train(use_random_init = true; visuals = false, num_steps = 10_000, inner_loops = 10, outer_loops = 10, plot_runs = true)
+    
+    rm(dirpath * "/training_frames/", recursive=true, force=true)
+    mkdir(dirpath * "/training_frames/")
+    frame = 1
+
+    if visuals
+        colorscale = [[0, "rgb(34, 74, 168)"], [0.5, "rgb(224, 224, 180)"], [1, "rgb(156, 33, 11)"], ]
+        ymax = 30
+        layout = Layout(
+                plot_bgcolor="#f1f3f7",
+                coloraxis = attr(cmin = 0, cmid = 1, cmax = 2, colorscale = colorscale),
+            )
+    end
+
+    if use_random_init
+        hook.generate_random_init = generate_random_init
+    else
+        hook.generate_random_init = false
+    end
+
+
+    global validation_scores
+    global agent_save
+
+    
+
+    for j = 1:outer_loops
+
+        for i = 1:inner_loops
+            println("")
+            stop_condition = StopAfterEpisodeWithMinSteps(num_steps)
+
+
+            # run start
+            hook(PRE_EXPERIMENT_STAGE, agent, env)
+            agent(PRE_EXPERIMENT_STAGE, env)
+            is_stop = false
+            while !is_stop
+                reset!(env)
+                agent(PRE_EPISODE_STAGE, env)
+                hook(PRE_EPISODE_STAGE, agent, env)
+
+                while !is_terminated(env) # one episode
+                    action = agent(env)
+
+                    agent(PRE_ACT_STAGE, env, action)
+                    hook(PRE_ACT_STAGE, agent, env, action)
+
+                    env(action)
+
+                    agent(POST_ACT_STAGE, env)
+                    hook(POST_ACT_STAGE, agent, env)
+
+                    if visuals
+                        p = plot(heatmap(z=env.y[1,:,:], coloraxis="coloraxis"), layout)
+
+                        savefig(p, dirpath * "/training_frames//a$(lpad(string(frame), 5, '0')).png"; width=1000, height=800)
+                    end
+
+                    frame += 1
+
+                    if stop_condition(agent, env)
+                        is_stop = true
+                        break
+                    end
+                end # end of an episode
+
+                if is_terminated(env)
+                    agent(POST_EPISODE_STAGE, env)  # let the agent see the last observation
+                    hook(POST_EPISODE_STAGE, agent, env)
+
+                end
+            end
+            hook(POST_EXPERIMENT_STAGE, agent, env)
+            # run end
+
+
+            println(hook.bestreward)
+
+            current_score = mean(validate_agent())
+            if !isempty(validation_scores) && current_score > maximum(validation_scores)
+                agent_save = deepcopy(agent)
+            end
+            
+            push!(validation_scores, current_score)
+
+            if !isempty(validation_scores)
+                println(lineplot(validation_scores, title="Validation scores", xlabel="Episode", ylabel="Score", color=:cyan))
+
+                println("Best validation score: $(maximum(validation_scores))")
+            end
+            
+        end
+
+        if plot_runs
+            p1 = render_run(; exploration = true)
+        end
+
+    end
+
+    if visuals && false
+        rm(dirpath * "/training.mp4", force=true)
+        run(`ffmpeg -framerate 16 -i $(dirpath * "/training_frames/a%05d.png") -c:v libx264 -crf 21 -an -pix_fmt yuv420p10le $(dirpath * "/training.mp4")`)
+    end
+
+    #save()
+end
+
+
+
+
+
+function load_agent(number = nothing)
+    if isnothing(number)
+        global hook = FileIO.load(dirpath * "/saves/hook.jld2","hook")
+        global agent = FileIO.load(dirpath * "/saves/agent.jld2","agent")
+        #global env = FileIO.load(dirpath * "/saves/env.jld2","env")
+    else
+        global hook = FileIO.load(dirpath * "/saves/hook$number.jld2","hook")
+        global agent = FileIO.load(dirpath * "/saves/agent$number.jld2","agent")
+        #global env = FileIO.load(dirpath * "/saves/env$number.jld2","env")
+    end
+end
+
+function save_agent(number = nothing)
+    isdir(dirpath * "/saves") || mkdir(dirpath * "/saves")
+
+    if isnothing(number)
+        FileIO.save(dirpath * "/saves/hook.jld2","hook",hook)
+        FileIO.save(dirpath * "/saves/agent.jld2","agent",agent)
+        #FileIO.save(dirpath * "/saves/env.jld2","env",env)
+    else
+        FileIO.save(dirpath * "/saves/hook$number.jld2","hook",hook)
+        FileIO.save(dirpath * "/saves/agent$number.jld2","agent",agent)
+        #FileIO.save(dirpath * "/saves/env$number.jld2","env",env)
+    end
+end
+
+
+function plot_rewards(smoothing = 30)
+    to_plot = Float64[]
+    for i in smoothing:length(hook.rewards)
+        push!(to_plot, mean(hook.rewards[i+1-smoothing:i]))
+    end
+
+    p = plot(to_plot)
+    display(p)
 end

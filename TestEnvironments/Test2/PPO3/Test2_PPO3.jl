@@ -43,7 +43,7 @@ gpu_env = false
 # agent tuning parameters
 memory_size = 0
 nna_scale = 1.6
-nna_scale_critic = 0.8
+nna_scale_critic = 1.8
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -54,7 +54,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 rng = StableRNG(seed)
 Random.seed!(seed)
 y = 0.99f0
-p = 0.0f0
+p = 0.99f0
 gamma = y
 
 start_steps = -1
@@ -66,21 +66,21 @@ critic_frozen_update_freq = 4
 actor_update_freq = 2
 
 
-learning_rate = 6e-5
-learning_rate_critic = 2e-4
+learning_rate = 1e-4
+learning_rate_critic = 3e-4
 n_epochs = 5
-n_microbatches = 100
-actorbatch_size = 10
-logσ_is_network = true
+n_microbatches = 10
+actorbatch_size = 80
+logσ_is_network = false
 max_σ = 1.0f0
-entropy_loss_weight = 0.02f0
-clip_grad = 0.5
+entropy_loss_weight = 0.0f0
+clip_grad = 0.02
 target_kl = 0.1
 clip1 = false
-start_logσ = -0.3
-tanh_end = true
+start_logσ = -0.6
+tanh_end = false
 clip_range = 0.05f0
-clip_range_vf = 0.1f0
+clip_range_vf = 0.08f0
 
 λ_targets = 0.9f0
 n_targets = 100
@@ -94,7 +94,7 @@ new_loss = false#true
 adaptive_weights = true
 critic2_takes_action = true
 use_popart = false
-critic_frozen_factor = 0.3f0
+critic_frozen_factor = 0.04f0
 use_exploration_module = false
 use_whole_delta_targets = true
 use_critic3 = false
@@ -190,8 +190,9 @@ initialize_setup()
 
 
 function render_run(; exploration = false, return_plot = false)
-    rewards = Float64[]
-    actions_taken = Float64[]
+    positions = Float64[]
+    times = Float64[]
+    zone_traces = [Float64[] for _ in 1:3]
 
     reset!(env)
     generate_random_init()
@@ -200,29 +201,60 @@ function render_run(; exploration = false, return_plot = false)
     while !env.done
         action = exploration ? agent(env) : prob(agent.policy, env).μ
         env(action)
-        push!(rewards, env.reward[1])
-        p_val = env.p isa AbstractArray ? env.p[1] : env.p
-        push!(actions_taken, Float64(p_val))
+        push!(positions, Float64(env.y[1]))
+        push!(times, Float64(env.y[2]))
+        push!(zone_traces[1], Float64(env.y[3]))
+        push!(zone_traces[2], Float64(env.y[4]))
+        push!(zone_traces[3], Float64(env.y[5]))
     end
 
-    time_axis = (0:length(rewards)-1) .* dt
+    time_axis = times
 
     layout = Layout(
         plot_bgcolor = "white",
         xaxis = attr(title = "Time"),
-        yaxis = attr(title = "Reward"),
-        yaxis2 = attr(
-            overlaying = "y",
-            side = "right",
-            title = "Action",
-        ),
+        yaxis = attr(title = "Position / Zones", range = [0, 1]),
         showlegend = true,
     )
 
-    plot_data = [
-        scatter(x = time_axis, y = rewards, mode = "lines+markers", name = "Reward per step"),
-        scatter(x = time_axis, y = actions_taken, mode = "lines+markers", name = "Action (env.p)", yaxis = "y2"),
+    colors = [
+        (255, 215, 0),   # yellow
+        (0, 180, 0),     # green
+        (220, 20, 60),   # red
     ]
+
+    plot_data = AbstractTrace[]
+
+    for i in 1:3
+        lower = zone_traces[i] .- delta_zone
+        upper = zone_traces[i] .+ delta_zone
+        fillcol = "rgba($(colors[i][1]), $(colors[i][2]), $(colors[i][3]), 0.25)"
+
+        push!(plot_data, scatter(
+            x = time_axis,
+            y = lower,
+            mode = "lines",
+            line_color = "rgba(0,0,0,0)",
+            showlegend = false
+        ))
+        push!(plot_data, scatter(
+            x = time_axis,
+            y = upper,
+            mode = "lines",
+            fill = "tonexty",
+            fillcolor = fillcol,
+            line_color = "rgba(0,0,0,0)",
+            name = "Zone $i"
+        ))
+    end
+
+    push!(plot_data, scatter(
+        x = time_axis,
+        y = positions,
+        mode = "lines+markers",
+        name = "Position",
+        line_color = "rgb(50,50,200)"
+    ))
 
     plt = plot(plot_data, layout)
 
