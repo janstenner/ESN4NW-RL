@@ -46,7 +46,7 @@ nna_scale_critic = 3.2
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
-logσ_is_network = true
+logσ_is_network = false
 tanh_end = false
 use_gpu = false
 actionspace = Space(fill(-1..1, (action_dim)))
@@ -62,21 +62,24 @@ target_entropy = -0.9f0
 use_popart = false
 
 
-learning_rate = 3e-4
-learning_rate_critic = 3e-4
+learning_rate = 3e-3
+learning_rate_critic = 3e-3
 trajectory_length = 1_000_000
-batch_size = 256
+batch_size = 32
 update_after = 100_000
-update_freq = 50
+update_freq = 30
 update_loops = 1
-clip_grad = 0.05
+clip_grad = 0.5
 start_logσ = -0.6
 automatic_entropy_tuning = true
-on_policy_critic_update_freq = 2500
+on_policy_update_freq = 8000
 λ_targets = 0.9f0
 lr_alpha = 1e-2
 fear_factor = 1.0f0
 target_frac = 1.0f0
+
+antithetic_mean_samples = 4
+on_policy_actor_loops = 2
 
 reward_shaping = false
 
@@ -132,12 +135,14 @@ function initialize_setup(;use_random_init = false)
                 automatic_entropy_tuning = automatic_entropy_tuning,
                 target_entropy = target_entropy,
                 use_popart = use_popart,
-                on_policy_critic_update_freq = on_policy_critic_update_freq,
+                on_policy_update_freq = on_policy_update_freq,
                 λ_targets = λ_targets,
                 lr_alpha = lr_alpha,
                 betas = betas,
                 fear_factor = fear_factor,
                 target_frac = target_frac,
+                antithetic_mean_samples = antithetic_mean_samples,
+                on_policy_actor_loops = on_policy_actor_loops,
                 )
 
 
@@ -222,6 +227,9 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
     global run_logs = []
 
+    global all_states = zeros(289, state_dim)
+    all_states[1,:] = env.state
+
     while !env.done
 
         if exploration
@@ -248,6 +256,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         temp_state = deepcopy(env.state)
         env(action; reward_shaping = reward_shaping)
 
+        all_states[env.steps+1,:] = env.state
         push!(terminals, env.done)
 
         if json

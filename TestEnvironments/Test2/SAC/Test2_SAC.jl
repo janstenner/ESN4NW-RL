@@ -61,7 +61,7 @@ target_entropy = -1.0
 use_popart = false
 
 
-learning_rate = 3e-4
+learning_rate = 3e-3
 trajectory_length = 1_000_000
 batch_size = 256
 update_after = 200_000

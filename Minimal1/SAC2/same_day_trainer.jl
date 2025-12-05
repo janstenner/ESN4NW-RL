@@ -41,7 +41,7 @@ function train_same_day(n = 100, days_per_trajectory = 10; show_plots = false, i
 
 
 
-        RL.on_policy_critic_update(agent.policy, multiple_day_trajectory; whole_trajectory = true)
+        RL.on_policy_update(agent.policy, multiple_day_trajectory; whole_trajectory = true)
 
 
         if inline_trajectory_analysis

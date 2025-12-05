@@ -42,8 +42,8 @@ gpu_env = false
 
 # agent tuning parameters
 memory_size = 0
-nna_scale = 6.4
-nna_scale_critic = 3.2
+nna_scale = 3.2
+nna_scale_critic = 1.6
 drop_middle_layer = false
 drop_middle_layer_critic = false
 fun = gelu
@@ -53,7 +53,7 @@ actionspace = Space(fill(-1..1, (action_dim)))
 # additional agent parameters
 rng = StableRNG(seed)
 Random.seed!(seed)
-y = 0.99f0
+y = 1.0f0
 p = 0.0f0
 gamma = y
 
@@ -70,7 +70,6 @@ learning_rate = 1e-4
 learning_rate_critic = 2e-4
 n_epochs = 5
 n_microbatches = 20
-actorbatch_size = 200
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0.0f0
@@ -78,7 +77,7 @@ clip_grad = 0.02
 target_kl = 0.1
 clip1 = false
 start_logσ = -0.6
-tanh_end = true
+tanh_end = false
 clip_range = 0.05f0
 clip_range_vf = 0.08f0
 
@@ -94,10 +93,17 @@ new_loss = false#true
 adaptive_weights = true
 critic2_takes_action = true
 use_popart = false
-critic_frozen_factor = 0.3f0
 use_exploration_module = false
 use_whole_delta_targets = true
 use_critic3 = false
+
+
+critic_frozen_factor = 0.0f0
+antithetic_mean_samples = 8
+zero_mean_tether_factor = 0.0f0
+actorbatch_size = nothing
+
+verbose = false
 
 reward_shaping = false
 
@@ -170,6 +176,9 @@ function initialize_setup(;use_random_init = false)
                 use_critic3 = use_critic3,
                 use_exploration_module = use_exploration_module,
                 use_whole_delta_targets = use_whole_delta_targets,
+                antithetic_mean_samples = antithetic_mean_samples,
+                zero_mean_tether_factor = zero_mean_tether_factor,
+                verbose = verbose,
                 )
 
 
@@ -261,6 +270,10 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
         )
     end
 
+
+    global all_states = zeros(289, state_dim)
+    all_states[1,:] = env.state
+
     while !env.done
 
         if exploration
@@ -306,6 +319,7 @@ function render_run(; plot_optimal = false, steps = 6000, show_training_episode 
 
         push!(terminals, env.done)
 
+        all_states[env.steps+1,:] = env.state
 
         for k in 1:n_windCORES
             push!(results_run["hpc$k"], clamp((action[1]+1)*0.5, 0, 1)) #env.p[k])

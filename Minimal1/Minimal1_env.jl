@@ -180,10 +180,15 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0, generate_da
     end
 
     if include_gradients > 0
-        g1 = (grid_price[history_steps+step] - grid_price[history_steps+step-1])/dt
+        g1 = 500 * (grid_price[history_steps+step] - grid_price[history_steps+step-1])/dt
         push!(y, g1)
         if include_gradients > 1
-            g2 = (grid_price[history_steps+step] - 2*grid_price[history_steps+step-1] + grid_price[history_steps+step-2])/(dt^2)
+
+            if (grid_price[history_steps+step] == 1.0 && grid_price[history_steps+step-2] != 1.0) || (grid_price[history_steps+step] != 1.0 && grid_price[history_steps+step-2] == 1.0)
+                g2 = 0.0
+            else
+                g2 = 50_000 * (grid_price[history_steps+step] - 2*grid_price[history_steps+step-1] + grid_price[history_steps+step-2])/(dt^2)
+            end
             push!(y, g2)
         end
     end
@@ -198,10 +203,10 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0, generate_da
         end
 
         if include_gradients > 0
-            g1 = (wind[i][history_steps+step] - wind[i][history_steps+step-1])/dt
+            g1 = 500 * (wind[i][history_steps+step] - wind[i][history_steps+step-1])/dt
             push!(y, g1)
             if include_gradients > 1
-                g2 = (wind[i][history_steps+step] - 2*wind[i][history_steps+step-1] + wind[i][history_steps+step-2])/(dt^2)
+                g2 = 50_000 * (wind[i][history_steps+step] - 2*wind[i][history_steps+step-1] + wind[i][history_steps+step-2])/(dt^2)
                 push!(y, g2)
             end
         end

@@ -70,7 +70,6 @@ learning_rate = 1e-4
 learning_rate_critic = 3e-4
 n_epochs = 5
 n_microbatches = 10
-actorbatch_size = 80
 logσ_is_network = false
 max_σ = 1.0f0
 entropy_loss_weight = 0.0f0
@@ -94,10 +93,16 @@ new_loss = false#true
 adaptive_weights = true
 critic2_takes_action = true
 use_popart = false
-critic_frozen_factor = 0.04f0
 use_exploration_module = false
 use_whole_delta_targets = true
 use_critic3 = false
+
+critic_frozen_factor = 0.0f0
+antithetic_mean_samples = 4
+zero_mean_tether_factor = 0.0f0
+actorbatch_size = nothing
+
+verbose = false
 
 reward_shaping = false
 
@@ -170,6 +175,9 @@ function initialize_setup(;use_random_init = false)
                 use_critic3 = use_critic3,
                 use_exploration_module = use_exploration_module,
                 use_whole_delta_targets = use_whole_delta_targets,
+                antithetic_mean_samples = antithetic_mean_samples,
+                zero_mean_tether_factor = zero_mean_tether_factor,
+                verbose = verbose,
                 )
 
 
