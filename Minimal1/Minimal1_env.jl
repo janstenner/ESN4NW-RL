@@ -130,7 +130,7 @@ function generate_grid_price(; same_day = false)
 
     gp = (-sin.(collect(LinRange(rand1*1.5*factor, 2+rand2*2.5*factor, grid_price_steps))) .+(1+(rand3*factor)))
 
-    clamp!(gp, -1, 1)
+    #clamp!(gp, -1, 1)
 
     #gp = ones(grid_price_steps)
 
@@ -184,11 +184,14 @@ function create_state(; env = nothing, compute_left = 1.0, step = 0, generate_da
         push!(y, g1)
         if include_gradients > 1
 
-            if (grid_price[history_steps+step] == 1.0 && grid_price[history_steps+step-2] != 1.0) || (grid_price[history_steps+step] != 1.0 && grid_price[history_steps+step-2] == 1.0)
-                g2 = 0.0
-            else
-                g2 = 50_000 * (grid_price[history_steps+step] - 2*grid_price[history_steps+step-1] + grid_price[history_steps+step-2])/(dt^2)
-            end
+            # if (grid_price[history_steps+step] == 1.0 && grid_price[history_steps+step-2] != 1.0) || (grid_price[history_steps+step] != 1.0 && grid_price[history_steps+step-2] == 1.0)
+            #     g2 = 0.0
+            # else
+            #     g2 = 50_000 * (grid_price[history_steps+step] - 2*grid_price[history_steps+step-1] + grid_price[history_steps+step-2])/(dt^2)
+            # end
+            g2 = 50_000 * (grid_price[history_steps+step] - 2*grid_price[history_steps+step-1] + grid_price[history_steps+step-2])/(dt^2)
+
+
             push!(y, g2)
         end
     end

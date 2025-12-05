@@ -1,0 +1,212 @@
+using LinearAlgebra
+using IntervalSets
+using StableRNGs
+using SparseArrays
+using FFTW
+using PlotlyJS
+using FileIO, JLD2
+using Flux
+using Random
+using RL
+using DataFrames
+using Statistics
+using JuMP
+using Ipopt
+using Optimisers
+#using Blink
+using JSON
+using UnicodePlots
+
+
+scriptname = "Test3_DDPG"
+
+
+#dir variable
+dirpath = string(@__DIR__)
+open(dirpath * "/.gitignore", "w") do io
+    println(io, "training_frames/*")
+    #println(io, "saves/*")
+end
+
+
+include("./../Test3_env.jl")
+
+
+seed = Int(floor(rand()*1000))
+# seed = 578
+
+gpu_env = false
+
+
+
+# agent tuning parameters
+memory_size = 0
+nna_scale = 1.6
+nna_scale_critic = 0.8
+drop_middle_layer = false
+drop_middle_layer_critic = false
+fun = gelu
+use_gpu = false
+actionspace = Space(fill(-1..1, (action_dim)))
+
+# additional agent parameters
+rng = StableRNG(seed)
+Random.seed!(seed)
+y = 0.99f0
+gamma = y
+p = 0.995f0
+batch_size = 256
+start_steps = -1
+start_policy = ZeroPolicy(actionspace)
+update_after = 200_000
+update_freq = 20
+update_loops = 3
+reset_stage = POST_EXPERIMENT_STAGE
+learning_rate = 5e-5
+learning_rate_critic = 1e-4
+clip_grad = 0.5
+act_limit = 1.0
+act_noise = 0.05
+trajectory_length = 1_000_000
+
+reward_shaping = false
+
+
+
+
+
+
+
+
+
+
+function initialize_setup(;use_random_init = false)
+
+    global env = GeneralEnv(do_step = do_step, 
+                reward_function = reward_function,
+                featurize = featurize,
+                prepare_action = prepare_action,
+                y0 = y0,
+                te = te, t0 = t0, dt = dt, 
+                sim_space = sim_space, 
+                action_space = actionspace,
+                max_value = 1.0,
+                check_max_value = "nothing")
+
+
+    global agent = create_agent(mono = true,
+                        action_space = actionspace,
+                        state_space = env.state_space,
+                        use_gpu = use_gpu, 
+                        rng = rng,
+                        y = y, p = p, batch_size = batch_size, 
+                        start_steps = start_steps, 
+                        start_policy = start_policy,
+                        update_after = update_after, 
+                        update_freq = update_freq,
+                        update_loops = update_loops,
+                        reset_stage = reset_stage,
+                        act_limit = act_limit, 
+                        act_noise = act_noise,
+                        nna_scale = nna_scale,
+                        nna_scale_critic = nna_scale_critic,
+                        drop_middle_layer = drop_middle_layer,
+                        drop_middle_layer_critic = drop_middle_layer_critic,
+                        fun = fun,
+                        memory_size = memory_size,
+                        trajectory_length = trajectory_length,
+                        learning_rate = learning_rate,
+                        learning_rate_critic = learning_rate_critic,
+                        clip_grad = clip_grad,)
+
+    global hook = GeneralHook(min_best_episode = min_best_episode,
+                            collect_NNA = false,
+                            generate_random_init = generate_random_init,
+                            collect_history = false,
+                            collect_rewards_all_timesteps = false,
+                            early_success_possible = true)
+end
+
+
+
+initialize_setup()
+
+
+
+
+
+function render_run(; exploration = false, return_plot = false)
+    positions = Float64[]
+    times = Float64[]
+    zone_traces = [Float64[] for _ in 1:3]
+
+    reset!(env)
+    generate_random_init()
+
+
+    while !env.done
+        action = exploration ? agent(env) : agent.policy.behavior_actor(env.state)
+        env(action)
+        push!(positions, Float64(env.y[1]))
+        push!(times, Float64(env.y[2]))
+        push!(zone_traces[1], Float64(env.y[3]))
+        push!(zone_traces[2], Float64(env.y[4]))
+        push!(zone_traces[3], Float64(env.y[5]))
+    end
+
+    time_axis = times
+
+    layout = Layout(
+        plot_bgcolor = "white",
+        xaxis = attr(title = "Time"),
+        yaxis = attr(title = "Position / Zones", range = [0, 1]),
+        showlegend = true,
+    )
+
+    colors = [
+        (255, 215, 0),   # yellow
+        (0, 180, 0),     # green
+        (220, 20, 60),   # red
+    ]
+
+    plot_data = AbstractTrace[]
+
+    for i in 1:3
+        lower = zone_traces[i] .- delta_zone
+        upper = zone_traces[i] .+ delta_zone
+        fillcol = "rgba($(colors[i][1]), $(colors[i][2]), $(colors[i][3]), 0.25)"
+
+        push!(plot_data, scatter(
+            x = time_axis,
+            y = lower,
+            mode = "lines",
+            line_color = "rgba(0,0,0,0)",
+            showlegend = false
+        ))
+        push!(plot_data, scatter(
+            x = time_axis,
+            y = upper,
+            mode = "lines",
+            fill = "tonexty",
+            fillcolor = fillcol,
+            line_color = "rgba(0,0,0,0)",
+            name = "Zone $i"
+        ))
+    end
+
+    push!(plot_data, scatter(
+        x = time_axis,
+        y = positions,
+        mode = "lines+markers",
+        name = "Position",
+        line_color = "rgb(50,50,200)"
+    ))
+
+    plt = plot(plot_data, layout)
+
+    if return_plot
+        return plt
+    else
+        display(plt)
+    end
+end
